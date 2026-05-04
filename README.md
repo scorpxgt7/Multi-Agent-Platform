@@ -54,13 +54,14 @@ external model provider.
 
 ## GitHub Pages
 
-- The live Pages site should be deployed from the built `dist/` output, not from
-  the repository root source files.
+- The repository currently works with GitHub Pages' legacy branch deployment by
+  redirecting the root page to the committed `docs/` build.
 - `.github/workflows/deploy-pages.yml` now builds and deploys the Vite app to
   GitHub Pages on every push to `main`.
-- In repository settings, set Pages to use `GitHub Actions` as the source.
 - As a branch-root fallback, `index.html` now redirects GitHub Pages traffic to
   a committed `docs/` build when the site is served from the repository itself.
+- The `docs/` build now uses stable asset names so stale cached HTML does not
+  break the site when new commits are pushed.
 
 ## Phase 5 notes
 
