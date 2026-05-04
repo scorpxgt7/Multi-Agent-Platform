@@ -30,12 +30,14 @@ external model provider.
 3. Build for production:
    `npm run build`
 
-## Phase 2 notes
+## Phase 3 notes
 
 - No external API is required to run the current app.
 - The manager, supervisor, and specialist flow is simulated locally so the UI
   and orchestration structure can be validated before backend integration.
-- The orchestration shell and runtime are now split so a backend provider
-  adapter can replace the local runtime without rewriting the UI.
-- The next major additions should be persistence, approvals, and backend-backed
-  execution adapters.
+- The orchestration shell and runtime are split so a backend provider adapter
+  can replace the local runtime without rewriting the UI.
+- Runtime mode and recent sessions are persisted locally.
+- A backend adapter entrypoint now exists at `/api/nexus/run`. A future backend
+  should return a JSON payload containing `entries`, `statuses`, and
+  `finalOutput`.

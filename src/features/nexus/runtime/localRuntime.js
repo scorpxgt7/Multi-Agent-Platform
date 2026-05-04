@@ -95,6 +95,10 @@ function buildFinalReport(task, agents, collected, synthesis) {
   ].join("\n");
 }
 
+function timeStamp() {
+  return new Date().toLocaleTimeString("en-US", { hour12: false });
+}
+
 export async function runLocalPipelineStage(stage, payload) {
   await wait(320);
 
@@ -112,4 +116,77 @@ export async function runLocalPipelineStage(stage, payload) {
     default:
       throw new Error(`Unknown stage: ${stage}`);
   }
+}
+
+export async function runLocalPipeline({ task, agents }) {
+  const entries = [];
+  const addEntry = (from, message, type = "system") => {
+    entries.push({
+      id: entries.length + 1,
+      from,
+      message,
+      type,
+      time: timeStamp(),
+    });
+  };
+
+  const directiveMap = buildDirectiveMap(task, agents);
+  const statuses = [];
+  addEntry("SYSTEM", "Runtime mode: local orchestrator. No external API is required in this phase.");
+
+  addEntry("MANAGER", "Analyzing task. Drafting operational plan...");
+  statuses.push({ id: "manager", status: "thinking" });
+  const managerPlan = await runLocalPipelineStage("manager-plan", { task, agents });
+  statuses.push({ id: "manager", status: "done" });
+  addEntry("MANAGER", managerPlan, "output");
+
+  addEntry("SUPERVISOR", "Plan received. Drafting agent directives...");
+  statuses.push({ id: "supervisor", status: "thinking" });
+  const supervisorBrief = await runLocalPipelineStage("supervisor-brief", { task, agents, directiveMap });
+  statuses.push({ id: "supervisor", status: "done" });
+  addEntry("SUPERVISOR", supervisorBrief, "output");
+
+  const collected = {};
+  for (let index = 0; index < agents.length; index += 1) {
+    const agent = agents[index];
+    const previousOutputs = agents.slice(0, index).map((previousAgent) => ({
+      name: previousAgent.name,
+      output: collected[previousAgent.name],
+    }));
+
+    statuses.push({ id: "supervisor", status: "active" });
+    statuses.push({ id: agent.id, status: "thinking" });
+    addEntry(agent.name.toUpperCase(), `Assigned. Starting ${agent.specialty}...`);
+    const contribution = await runLocalPipelineStage("agent-contribution", {
+      task,
+      agent,
+      directive: directiveMap[agent.name],
+      previousOutputs,
+    });
+    collected[agent.name] = contribution;
+    statuses.push({ id: agent.id, status: "done" });
+    addEntry(agent.name.toUpperCase(), contribution, "output");
+  }
+
+  statuses.push({ id: "supervisor", status: "thinking" });
+  addEntry("SUPERVISOR", "All specialists complete. Synthesizing...");
+  const synthesis = await runLocalPipelineStage("supervisor-synthesis", { task, agents, collected });
+  statuses.push({ id: "supervisor", status: "done" });
+  addEntry("SUPERVISOR", "Synthesis complete. Escalating to Manager.");
+
+  statuses.push({ id: "manager", status: "thinking" });
+  addEntry("MANAGER", "Reviewing synthesis. Preparing final deliverable...");
+  const finalOutput = await runLocalPipelineStage("manager-final", { task, agents, collected, synthesis });
+  statuses.push({ id: "manager", status: "done" });
+  addEntry("MANAGER", "Mission complete. Final report ready.", "success");
+
+  return {
+    managerPlan,
+    supervisorBrief,
+    synthesis,
+    finalOutput,
+    collected,
+    statuses,
+    entries,
+  };
 }

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { AGENT_COLORS, DEFAULT_AGENTS, EMPTY_STATUSES, STATUS_COLOR, TASK_PRESETS } from "./data.js";
-import { buildDirectiveMap, runLocalPipelineStage } from "./runtime/localRuntime.js";
+import { RUNTIME_OPTIONS, runPipelineWithRuntime } from "./runtime/client.js";
+import { loadRuntimeMode, loadSessionHistory, saveRuntimeMode, saveSessionHistory } from "./storage.js";
 
 function AgentNode({ name, role, status, size = "sm", onClick }) {
   const color = STATUS_COLOR[status] || STATUS_COLOR.idle;
@@ -82,6 +83,8 @@ export default function NexusAgentPlatform() {
   const [log, setLog] = useState([]);
   const [finalOutput, setFinalOutput] = useState("");
   const [activeTab, setActiveTab] = useState("log");
+  const [runtimeMode, setRuntimeMode] = useState(() => loadRuntimeMode());
+  const [sessionHistory, setSessionHistory] = useState(() => loadSessionHistory());
   const [showConfig, setShowConfig] = useState(false);
   const [editAgent, setEditAgent] = useState(null);
   const logRef = useRef(null);
@@ -97,6 +100,14 @@ export default function NexusAgentPlatform() {
       logRef.current.scrollTop = logRef.current.scrollHeight;
     }
   }, [log]);
+
+  useEffect(() => {
+    saveRuntimeMode(runtimeMode);
+  }, [runtimeMode]);
+
+  useEffect(() => {
+    saveSessionHistory(sessionHistory);
+  }, [sessionHistory]);
 
   const setStatus = useCallback((id, status) => {
     setStatuses((previous) => ({ ...previous, [id]: status }));
@@ -141,69 +152,28 @@ export default function NexusAgentPlatform() {
     resetAll();
 
     const activeAgents = agentsRef.current;
-    const directiveMap = buildDirectiveMap(task, activeAgents);
 
     try {
-      setStatus("manager", "thinking");
-      addLog("SYSTEM", "Runtime mode: local orchestrator. No external API is required in this phase.", "system");
-      addLog("MANAGER", "Analyzing task. Drafting operational plan...", "system");
-      const managerPlan = await runLocalPipelineStage("manager-plan", { task, agents: activeAgents });
-      setStatus("manager", "done");
-      addLog("MANAGER", managerPlan, "output");
-
-      setStatus("supervisor", "thinking");
-      addLog("SUPERVISOR", "Plan received. Drafting agent directives...", "system");
-      const supervisorBrief = await runLocalPipelineStage("supervisor-brief", { task, agents: activeAgents, directiveMap });
-      setStatus("supervisor", "done");
-      addLog("SUPERVISOR", supervisorBrief, "output");
-
-      const collected = {};
-      for (let index = 0; index < activeAgents.length; index += 1) {
-        const agent = activeAgents[index];
-        const previousOutputs = activeAgents.slice(0, index).map((previousAgent) => ({
-          name: previousAgent.name,
-          output: collected[previousAgent.name],
-        }));
-
-        setStatus("supervisor", "active");
-        setStatus(agent.id, "thinking");
-        addLog(agent.name.toUpperCase(), `Assigned. Starting ${agent.specialty}...`, "system");
-
-        const contribution = await runLocalPipelineStage("agent-contribution", {
-          task,
-          agent,
-          directive: directiveMap[agent.name],
-          previousOutputs,
-        });
-
-        collected[agent.name] = contribution;
-        setStatus(agent.id, "done");
-        addLog(agent.name.toUpperCase(), contribution, "output");
-      }
-
-      setStatus("supervisor", "thinking");
-      addLog("SUPERVISOR", "All specialists complete. Synthesizing...", "system");
-      const synthesis = await runLocalPipelineStage("supervisor-synthesis", {
-        task,
-        agents: activeAgents,
-        collected,
+      const result = await runPipelineWithRuntime(runtimeMode, { task, agents: activeAgents });
+      result.statuses.forEach((entry) => {
+        setStatus(entry.id, entry.status);
       });
-      setStatus("supervisor", "done");
-      addLog("SUPERVISOR", "Synthesis complete. Escalating to Manager.", "system");
-
-      setStatus("manager", "thinking");
-      addLog("MANAGER", "Reviewing synthesis. Preparing final deliverable...", "system");
-      const finalReport = await runLocalPipelineStage("manager-final", {
-        task,
-        agents: activeAgents,
-        collected,
-        synthesis,
+      result.entries.forEach((entry) => {
+        addLog(entry.from, entry.message, entry.type);
       });
-      setFinalOutput(finalReport);
-      setStatus("manager", "done");
-      addLog("MANAGER", "Mission complete. Final report ready.", "success");
+      setFinalOutput(result.finalOutput);
       setPhase("complete");
       setActiveTab("output");
+      setSessionHistory((previous) => [
+        {
+          id: Date.now(),
+          runtimeMode,
+          task,
+          time: new Date().toLocaleString("en-US"),
+          finalOutput: result.finalOutput,
+        },
+        ...previous,
+      ]);
     } catch (error) {
       addLog("SYSTEM", `Error: ${error.message}`, "error");
       setPhase("error");
@@ -276,6 +246,14 @@ export default function NexusAgentPlatform() {
 
           <div style={{ padding: "14px 14px", flex: 1, display: "flex", flexDirection: "column", gap: 10, overflow: "auto" }}>
             <div style={{ fontFamily: "'Share Tech Mono',monospace", fontSize: 8, color: "#2e3d4d", letterSpacing: "0.22em", textTransform: "uppercase" }}>Task Input</div>
+            <div>
+              <div style={{ fontFamily: "'Share Tech Mono',monospace", fontSize: 8, color: "#2e3d4d", letterSpacing: "0.15em", textTransform: "uppercase", marginBottom: 6 }}>Runtime Mode</div>
+              <select value={runtimeMode} onChange={(event) => setRuntimeMode(event.target.value)} disabled={running} style={{ width: "100%", background: "#0b0e15", border: "1px solid #1a2530", borderRadius: 4, color: "#8fa0b0", padding: "9px 11px", fontFamily: "'Share Tech Mono',monospace", fontSize: 10 }}>
+                {RUNTIME_OPTIONS.map((option) => (
+                  <option key={option.value} value={option.value}>{option.label}</option>
+                ))}
+              </select>
+            </div>
             <div style={{ display: "grid", gap: 8 }}>
               {TASK_PRESETS.map((preset) => (
                 <button key={preset.label} type="button" disabled={running} onClick={() => setTask(preset.task)} style={{ textAlign: "left", padding: "9px 11px", background: "#0b0e15", border: "1px solid #1a2530", borderRadius: 4, color: "#8fa0b0", cursor: "pointer", fontFamily: "'Share Tech Mono',monospace", fontSize: 10 }}>
@@ -293,9 +271,35 @@ export default function NexusAgentPlatform() {
               </button>
             )}
             <div style={{ padding: "10px", background: "#0c1018", border: "1px solid #141c28", borderRadius: 4 }}>
-              <div style={{ fontFamily: "'Share Tech Mono',monospace", fontSize: 8, color: "#2e3d4d", letterSpacing: "0.15em", marginBottom: 6, textTransform: "uppercase" }}>Phase 2 Runtime Boundary</div>
+              <div style={{ fontFamily: "'Share Tech Mono',monospace", fontSize: 8, color: "#2e3d4d", letterSpacing: "0.15em", marginBottom: 6, textTransform: "uppercase" }}>Phase 3 Runtime Boundary</div>
               <div style={{ fontFamily: "'Share Tech Mono',monospace", fontSize: 9, color: "#364556", lineHeight: 1.5 }}>
-                The orchestration shell now reads from modular runtime files in src, so a backend provider adapter can replace the local runtime without rewriting the UI.
+                The orchestration shell can now switch between local simulation and a backend adapter. Runtime mode and session history are persisted locally.
+              </div>
+            </div>
+            <div style={{ padding: "10px", background: "#0c1018", border: "1px solid #141c28", borderRadius: 4 }}>
+              <div style={{ fontFamily: "'Share Tech Mono',monospace", fontSize: 8, color: "#2e3d4d", letterSpacing: "0.15em", marginBottom: 6, textTransform: "uppercase" }}>Recent Sessions</div>
+              <div style={{ display: "grid", gap: 8 }}>
+                {sessionHistory.length === 0 ? (
+                  <div style={{ fontFamily: "'Share Tech Mono',monospace", fontSize: 9, color: "#364556", lineHeight: 1.5 }}>
+                    No saved sessions yet.
+                  </div>
+                ) : (
+                  sessionHistory.slice(0, 4).map((session) => (
+                    <button
+                      key={session.id}
+                      type="button"
+                      onClick={() => {
+                        setTask(session.task);
+                        setFinalOutput(session.finalOutput);
+                        setActiveTab("output");
+                      }}
+                      style={{ textAlign: "left", padding: "9px 11px", background: "#07090e", border: "1px solid #1a2530", borderRadius: 4, color: "#8fa0b0", cursor: "pointer", fontFamily: "'Share Tech Mono',monospace", fontSize: 9 }}
+                    >
+                      <div>{session.time}</div>
+                      <div>{session.runtimeMode.toUpperCase()} - {session.task.slice(0, 48)}{session.task.length > 48 ? "..." : ""}</div>
+                    </button>
+                  ))
+                )}
               </div>
             </div>
           </div>
