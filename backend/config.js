@@ -81,6 +81,36 @@ export function loadConfig() {
   };
 }
 
+export function getConfigAdvisories(config) {
+  const advisories = [];
+
+  if (config.allowedOrigins.includes("*") && config.publicAppUrl) {
+    advisories.push({
+      level: "warn",
+      key: "cors_wildcard_public",
+      message: "CORS is configured as wildcard while a public app URL is set.",
+    });
+  }
+
+  if (config.publicAppUrl && ["127.0.0.1", "localhost"].includes(config.host)) {
+    advisories.push({
+      level: "warn",
+      key: "local_host_public_url",
+      message: "Backend host is local-only while a public app URL is configured.",
+    });
+  }
+
+  if (config.maintenanceEnabled && !config.maintenanceDailyUtc && !config.maintenanceIntervalMinutes) {
+    advisories.push({
+      level: "warn",
+      key: "maintenance_schedule_missing",
+      message: "Maintenance auto-run is enabled without a usable schedule.",
+    });
+  }
+
+  return advisories;
+}
+
 export function isOriginAllowed(origin, allowedOrigins) {
   if (!origin) {
     return true;

@@ -1,6 +1,6 @@
 import http from "node:http";
 import crypto from "node:crypto";
-import { createCorsHeaders, isOriginAllowed, loadConfig } from "./config.js";
+import { createCorsHeaders, getConfigAdvisories, isOriginAllowed, loadConfig } from "./config.js";
 import { getDiagnosticSummary, listDiagnosticEvents, recordDiagnosticEvent } from "./diagnosticsStorage.js";
 import { ApiError, sendApiError, sendApiSuccess } from "./errors.js";
 import { getDefaultEngineId, getEngine, listEngines } from "./engines/index.js";
@@ -53,6 +53,7 @@ const server = http.createServer(async (request, response) => {
     try {
       const engines = await listEngines();
       const persistence = await getPersistenceHealth();
+      const configAdvisories = getConfigAdvisories(CONFIG);
       if (persistence.error && persistence.error !== lastPersistenceErrorMessage) {
         lastPersistenceErrorMessage = persistence.error;
         await recordDiagnosticEvent({
@@ -82,6 +83,7 @@ const server = http.createServer(async (request, response) => {
           publicAppUrl: CONFIG.publicAppUrl || null,
           allowedOrigins: CONFIG.allowedOrigins,
           corsMode: CONFIG.allowedOrigins.includes("*") ? "wildcard" : "allowlist",
+          configAdvisories,
         },
         diagnostics,
       }, corsHeaders);

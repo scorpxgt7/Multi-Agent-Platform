@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { AGENT_COLORS, DEFAULT_AGENTS, EMPTY_STATUSES, STATUS_COLOR, TASK_PRESETS } from "./data.js";
-import { RUNTIME_OPTIONS, fetchDiagnosticsForRuntime, fetchMaintenanceForRuntime, fetchRunDetailForRuntime, fetchRunsForRuntime, fetchRuntimeHealth, probeBackendRuntime, runMaintenanceForRuntime, runPipelineWithRuntime } from "./runtime/client.js";
+import { RUNTIME_OPTIONS, fetchDiagnosticsForRuntime, fetchMaintenanceForRuntime, fetchMaintenanceReviewsForRuntime, fetchRunDetailForRuntime, fetchRunsForRuntime, fetchRuntimeHealth, probeBackendRuntime, runMaintenanceForRuntime, runPipelineWithRuntime } from "./runtime/client.js";
 import { loadApprovalGate, loadBackendBaseUrl, loadRuntimeMode, loadSelectedEngine, loadSessionHistory, saveApprovalGate, saveBackendBaseUrl, saveRuntimeMode, saveSelectedEngine, saveSessionHistory } from "./storage.js";
 
 function AgentNode({ name, role, status, size = "sm", onClick }) {
@@ -136,6 +136,7 @@ export default function NexusAgentPlatform() {
   const [backendHealth, setBackendHealth] = useState(null);
   const [diagnosticsSummary, setDiagnosticsSummary] = useState(null);
   const [maintenanceStatus, setMaintenanceStatus] = useState(null);
+  const [maintenanceReviews, setMaintenanceReviews] = useState([]);
   const [maintenanceRunning, setMaintenanceRunning] = useState(false);
   const [sessionHistory, setSessionHistory] = useState(() => loadSessionHistory());
   const [backendRuns, setBackendRuns] = useState([]);
@@ -266,20 +267,26 @@ export default function NexusAgentPlatform() {
 
     if (runtimeMode !== "backend" || !backendHealth) {
       setMaintenanceStatus(null);
+      setMaintenanceReviews([]);
       return () => {
         isActive = false;
       };
     }
 
-    fetchMaintenanceForRuntime("backend", { baseUrl: backendBaseUrl })
-      .then((maintenance) => {
+    Promise.all([
+      fetchMaintenanceForRuntime("backend", { baseUrl: backendBaseUrl }),
+      fetchMaintenanceReviewsForRuntime("backend", { baseUrl: backendBaseUrl, limit: 4 }),
+    ])
+      .then(([maintenance, reviews]) => {
         if (isActive) {
           setMaintenanceStatus(maintenance);
+          setMaintenanceReviews(reviews);
         }
       })
       .catch(() => {
         if (isActive) {
           setMaintenanceStatus(null);
+          setMaintenanceReviews([]);
         }
       });
 
@@ -514,13 +521,15 @@ export default function NexusAgentPlatform() {
     setMaintenanceRunning(true);
     try {
       await runMaintenanceForRuntime("backend", { baseUrl: backendBaseUrl });
-      const [diagnostics, maintenance, health] = await Promise.all([
+      const [diagnostics, maintenance, reviews, health] = await Promise.all([
         fetchDiagnosticsForRuntime("backend", { baseUrl: backendBaseUrl }),
         fetchMaintenanceForRuntime("backend", { baseUrl: backendBaseUrl }),
+        fetchMaintenanceReviewsForRuntime("backend", { baseUrl: backendBaseUrl, limit: 4 }),
         fetchRuntimeHealth("backend", { baseUrl: backendBaseUrl }),
       ]);
       setDiagnosticsSummary(diagnostics);
       setMaintenanceStatus(maintenance);
+      setMaintenanceReviews(reviews);
       setRuntimeHealth(health);
     } finally {
       setMaintenanceRunning(false);
@@ -687,7 +696,13 @@ export default function NexusAgentPlatform() {
                     <div>CORS mode: {runtimeHealth.deployment?.corsMode || "unknown"}</div>
                     <div>Allowed origins: {Array.isArray(runtimeHealth.deployment?.allowedOrigins) ? runtimeHealth.deployment.allowedOrigins.join(", ") : "n/a"}</div>
                     <div>Public app URL: {runtimeHealth.deployment?.publicAppUrl || "n/a"}</div>
+                    <div>Config advisories: {runtimeHealth.deployment?.configAdvisories?.length || 0}</div>
                     <div>Available engines: {availableBackendEngines.length ? availableBackendEngines.map((engine) => `${engine.label} (${engine.id})`).join(", ") : "None detected"}</div>
+                    {runtimeHealth.deployment?.configAdvisories?.length > 0 && (
+                      <div style={{ color: "#f59e0b" }}>
+                        {runtimeHealth.deployment.configAdvisories.map((advisory) => advisory.message).join(" | ")}
+                      </div>
+                    )}
                   </>
                 ) : backendHealth ? (
                   <div>Backend adapter detected at {backendBaseUrl.trim() || "same-origin /api"}. Switch runtime mode to use server-backed execution.</div>
@@ -731,6 +746,27 @@ export default function NexusAgentPlatform() {
                   <button onClick={() => { void runMaintenanceReview(); }} disabled={maintenanceRunning || running} style={{ marginTop: 8, width: "100%", padding: "8px 0", background: "#111522", border: "1px solid #1a2530", borderRadius: 4, color: "#d5dde6", cursor: "pointer", fontFamily: "Rajdhani,sans-serif", fontWeight: 700, fontSize: 11, letterSpacing: "0.1em", textTransform: "uppercase" }}>
                     {maintenanceRunning ? "Maintenance Running" : "Run Maintenance Review"}
                   </button>
+                  <div style={{ display: "grid", gap: 6, marginTop: 8 }}>
+                    {maintenanceReviews.length === 0 ? (
+                      <div style={{ fontFamily: "'Share Tech Mono',monospace", fontSize: 8, color: "#364556", lineHeight: 1.5 }}>
+                        No persisted maintenance reviews yet.
+                      </div>
+                    ) : (
+                      maintenanceReviews.map((review) => (
+                        <div key={review.id} style={{ background: "#07090e", border: "1px solid #1a2530", borderRadius: 4, padding: "8px 10px" }}>
+                          <div style={{ color: review.status === "fail" ? "#ef4444" : review.status === "warn" ? "#f59e0b" : "#10b981", fontFamily: "'Share Tech Mono',monospace", fontSize: 8, textTransform: "uppercase", marginBottom: 3 }}>
+                            {review.status} · {review.source}
+                          </div>
+                          <div style={{ color: "#8fa0b0", fontFamily: "'Share Tech Mono',monospace", fontSize: 8, marginBottom: 3 }}>
+                            {review.time}
+                          </div>
+                          <div style={{ color: "#364556", fontFamily: "'Share Tech Mono',monospace", fontSize: 8, lineHeight: 1.5 }}>
+                            {review.summary}
+                          </div>
+                        </div>
+                      ))
+                    )}
+                  </div>
                 </>
               ) : (
                 <div style={{ fontFamily: "'Share Tech Mono',monospace", fontSize: 9, color: "#364556", lineHeight: 1.5 }}>

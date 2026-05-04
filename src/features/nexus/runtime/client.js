@@ -1,4 +1,4 @@
-import { fetchBackendDiagnosticsSummary, fetchBackendHealth, fetchBackendMaintenanceStatus, fetchBackendRunDetail, fetchBackendRuns, runBackendMaintenanceReview, runBackendPipeline } from "./backendRuntime.js";
+import { fetchBackendDiagnosticsSummary, fetchBackendHealth, fetchBackendMaintenanceReviews, fetchBackendMaintenanceStatus, fetchBackendRunDetail, fetchBackendRuns, runBackendMaintenanceReview, runBackendPipeline } from "./backendRuntime.js";
 import { runLocalPipeline } from "./localRuntime.js";
 
 export const RUNTIME_OPTIONS = [
@@ -78,4 +78,12 @@ export async function runMaintenanceForRuntime(runtimeMode, options = {}) {
   }
 
   return null;
+}
+
+export async function fetchMaintenanceReviewsForRuntime(runtimeMode, options = {}) {
+  if (runtimeMode === "backend") {
+    return fetchBackendMaintenanceReviews(options.baseUrl, options.limit);
+  }
+
+  return [];
 }

@@ -1,5 +1,5 @@
 import crypto from "node:crypto";
-import { loadConfig } from "./config.js";
+import { getConfigAdvisories, loadConfig } from "./config.js";
 import { recordDiagnosticEvent, getDiagnosticSummary } from "./diagnosticsStorage.js";
 import { listEngines, getDefaultEngineId } from "./engines/index.js";
 import { getLatestMaintenanceReview, getMaintenanceStorageMeta, listMaintenanceReviews, saveMaintenanceReview } from "./maintenanceStorage.js";
@@ -68,6 +68,7 @@ export async function runMaintenanceReview({ source = "manual" } = {}) {
 
   const defaultEngineId = getDefaultEngineId();
   const defaultEngine = engines.find((engine) => engine.id === defaultEngineId);
+  const configAdvisories = getConfigAdvisories(config);
   const recentRuns = runs.slice(0, 10);
   const failedRuns = recentRuns.filter((run) => run.status === "failed");
   const recentErrorCount = diagnostics.byLevel?.error || 0;
@@ -85,8 +86,10 @@ export async function runMaintenanceReview({ source = "manual" } = {}) {
     },
     {
       key: "default_engine",
-      status: defaultEngine?.available ? "pass" : "fail",
-      message: defaultEngine?.available
+      status: !defaultEngine ? "fail" : defaultEngine.available ? "pass" : "fail",
+      message: !defaultEngine
+        ? `Configured default engine ${defaultEngineId} is unknown.`
+        : defaultEngine?.available
         ? `Default engine ${defaultEngineId} is available.`
         : `Default engine ${defaultEngineId} is not available.`,
       details: {
@@ -129,6 +132,16 @@ export async function runMaintenanceReview({ source = "manual" } = {}) {
       details: {
         publicAppUrl: config.publicAppUrl || null,
         allowedOrigins: config.allowedOrigins,
+      },
+    },
+    {
+      key: "config_advisories",
+      status: configAdvisories.some((advisory) => advisory.level === "warn") ? "warn" : "pass",
+      message: configAdvisories.length
+        ? `${configAdvisories.length} backend config advisory item(s) detected.`
+        : "Backend config advisories are clean.",
+      details: {
+        advisories: configAdvisories,
       },
     },
   ];
