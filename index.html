@@ -5,8 +5,26 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Multi-Agent Platform</title>
   </head>
-  <body>
+  <body style="margin:0;background:#06080c;color:#dce8f0;font-family:Arial,sans-serif;">
     <div id="root"></div>
-    <script type="module" src="/src/main.jsx"></script>
+    <script>
+      const isDirectFileOpen = window.location.protocol === "file:";
+      const isBuiltEntry = /[\\\/]dist[\\\/]index\.html$/i.test(window.location.pathname);
+      if (isDirectFileOpen && !isBuiltEntry) {
+        const root = document.getElementById("root");
+        root.innerHTML = `
+          <div style="min-height:100vh;display:flex;align-items:center;justify-content:center;padding:24px;">
+            <div style="max-width:720px;background:#0c1018;border:1px solid #1a2530;border-radius:12px;padding:24px;line-height:1.6;">
+              <h1 style="margin:0 0 12px 0;font-size:24px;">Multi-Agent Platform</h1>
+              <p style="margin:0 0 12px 0;">The source app cannot run directly from <code>file:///</code>. Use one of these options instead:</p>
+              <p style="margin:0 0 8px 0;">1. Start the dev server with <code>npm run dev</code></p>
+              <p style="margin:0 0 8px 0;">2. Open the built app at <code>dist/index.html</code></p>
+              <p style="margin:12px 0 0 0;">The built app is configured for direct file opening after the next build.</p>
+            </div>
+          </div>
+        `;
+      }
+    </script>
+    <script type="module" src="./src/main.jsx"></script>
   </body>
-  </html>
+</html>

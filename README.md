@@ -27,7 +27,9 @@ external model provider.
    `npm install`
 2. Start the dev server:
    `npm run dev`
-3. Build for production:
+3. Start the backend adapter:
+   `npm run backend`
+4. Build for production:
    `npm run build`
 
 ## Phase 3 notes
@@ -41,3 +43,11 @@ external model provider.
 - A backend adapter entrypoint now exists at `/api/nexus/run`. A future backend
   should return a JSON payload containing `entries`, `statuses`, and
   `finalOutput`.
+
+## Phase 4 notes
+
+- `backend/server.js` now provides `GET /api/health` and `POST /api/nexus/run`.
+- In backend mode, the frontend calls the adapter through Vite's `/api` proxy in
+  development.
+- The backend currently uses the same orchestration logic as the local runtime,
+  but it already matches the contract needed for a future model-backed service.
