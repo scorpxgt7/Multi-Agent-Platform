@@ -1,4 +1,4 @@
-import { fetchBackendRunDetail, fetchBackendRuns, runBackendPipeline } from "./backendRuntime.js";
+import { fetchBackendHealth, fetchBackendRunDetail, fetchBackendRuns, runBackendPipeline } from "./backendRuntime.js";
 import { runLocalPipeline } from "./localRuntime.js";
 
 export const RUNTIME_OPTIONS = [
@@ -28,4 +28,22 @@ export async function fetchRunDetailForRuntime(runtimeMode, runId) {
   }
 
   return null;
+}
+
+export async function fetchRuntimeHealth(runtimeMode) {
+  if (runtimeMode === "backend") {
+    return fetchBackendHealth();
+  }
+
+  return {
+    ok: true,
+    service: "local-runtime",
+    defaultEngine: "local-simulation",
+    engines: [
+      {
+        id: "local-simulation",
+        label: "Local Simulation",
+      },
+    ],
+  };
 }

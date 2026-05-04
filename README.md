@@ -83,3 +83,12 @@ external model provider.
   executions.
 - The frontend can reopen backend runs with logs, final output, and artifact
   previews instead of only showing shallow session summaries.
+
+## Backend engine abstraction
+
+- The backend no longer calls the orchestration runtime directly from the route.
+- `backend/engines/` now owns execution engine selection behind a stable API.
+- `GET /api/health` returns the configured default engine and the available
+  backend engines.
+- The frontend surfaces runtime health so backend mode reports which execution
+  engine is active.

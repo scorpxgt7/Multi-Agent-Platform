@@ -1,10 +1,10 @@
-export async function runBackendPipeline({ task, agents }) {
+export async function runBackendPipeline({ task, agents, engine = "local-simulation" }) {
   const response = await fetch("/api/nexus/run", {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
     },
-    body: JSON.stringify({ task, agents }),
+    body: JSON.stringify({ task, agents, engine }),
   });
 
   if (!response.ok) {
@@ -15,6 +15,22 @@ export async function runBackendPipeline({ task, agents }) {
   const payload = await response.json();
   if (!payload || !payload.finalOutput || !Array.isArray(payload.entries)) {
     throw new Error("Backend runtime returned an invalid response shape.");
+  }
+
+  return payload;
+}
+
+export async function fetchBackendHealth() {
+  const response = await fetch("/api/health");
+
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(text || `Backend health request failed with status ${response.status}`);
+  }
+
+  const payload = await response.json();
+  if (!payload || !Array.isArray(payload.engines) || !payload.defaultEngine) {
+    throw new Error("Backend health response is invalid.");
   }
 
   return payload;

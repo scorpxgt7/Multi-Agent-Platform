@@ -1,7 +1,7 @@
 import http from "node:http";
 import fs from "node:fs/promises";
 import path from "node:path";
-import { runLocalPipeline } from "../src/features/nexus/runtime/localRuntime.js";
+import { getDefaultEngineId, getEngine, listEngines } from "./engines/index.js";
 
 const PORT = Number(process.env.PORT || 8787);
 const DATA_DIR = path.resolve("backend/data");
@@ -56,6 +56,7 @@ function buildRunSummary(run) {
   return {
     id: run.id,
     runtimeMode: run.runtimeMode,
+    engine: run.engine,
     task: run.task,
     time: run.time,
     finalOutput: run.finalOutput,
@@ -75,7 +76,13 @@ const server = http.createServer(async (request, response) => {
   }
 
   if (request.method === "GET" && request.url === "/api/health") {
-    sendJson(response, 200, { ok: true, service: "nexus-backend", port: PORT });
+    sendJson(response, 200, {
+      ok: true,
+      service: "nexus-backend",
+      port: PORT,
+      defaultEngine: getDefaultEngineId(),
+      engines: listEngines(),
+    });
     return;
   }
 
@@ -114,6 +121,10 @@ const server = http.createServer(async (request, response) => {
       const payload = await collectJson(request);
       const task = typeof payload.task === "string" ? payload.task.trim() : "";
       const agents = Array.isArray(payload.agents) ? payload.agents : [];
+      const requestedEngineId = typeof payload.engine === "string" && payload.engine.trim()
+        ? payload.engine.trim()
+        : getDefaultEngineId();
+      const engine = getEngine(requestedEngineId);
 
       if (!task) {
         sendJson(response, 400, { error: "Task is required." });
@@ -125,7 +136,7 @@ const server = http.createServer(async (request, response) => {
         return;
       }
 
-      const result = await runLocalPipeline({ task, agents });
+      const result = await engine.run({ task, agents });
       const runs = await loadRuns();
       const artifacts = agents.map((agent) => ({
         agentId: agent.id,
@@ -138,6 +149,7 @@ const server = http.createServer(async (request, response) => {
       const runRecord = {
         id: Date.now(),
         runtimeMode: "backend",
+        engine: engine.id,
         task,
         time: new Date().toLocaleString("en-US"),
         finalOutput: result.finalOutput,
@@ -150,7 +162,11 @@ const server = http.createServer(async (request, response) => {
       };
       runs.unshift(runRecord);
       await saveRuns(runs);
-      sendJson(response, 200, result);
+      sendJson(response, 200, {
+        ...result,
+        engine: engine.id,
+        engineLabel: engine.label,
+      });
       return;
     } catch (error) {
       sendJson(response, 500, { error: error.message || "Backend pipeline failed." });

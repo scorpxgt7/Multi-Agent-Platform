@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { AGENT_COLORS, DEFAULT_AGENTS, EMPTY_STATUSES, STATUS_COLOR, TASK_PRESETS } from "./data.js";
-import { RUNTIME_OPTIONS, fetchRunDetailForRuntime, fetchRunsForRuntime, runPipelineWithRuntime } from "./runtime/client.js";
+import { RUNTIME_OPTIONS, fetchRunDetailForRuntime, fetchRunsForRuntime, fetchRuntimeHealth, runPipelineWithRuntime } from "./runtime/client.js";
 import { loadRuntimeMode, loadSessionHistory, saveRuntimeMode, saveSessionHistory } from "./storage.js";
 
 function AgentNode({ name, role, status, size = "sm", onClick }) {
@@ -100,6 +100,7 @@ export default function NexusAgentPlatform() {
   const [finalOutput, setFinalOutput] = useState("");
   const [activeTab, setActiveTab] = useState("log");
   const [runtimeMode, setRuntimeMode] = useState(() => loadRuntimeMode());
+  const [runtimeHealth, setRuntimeHealth] = useState(null);
   const [sessionHistory, setSessionHistory] = useState(() => loadSessionHistory());
   const [backendRuns, setBackendRuns] = useState([]);
   const [selectedRunArtifacts, setSelectedRunArtifacts] = useState([]);
@@ -126,6 +127,26 @@ export default function NexusAgentPlatform() {
   useEffect(() => {
     saveSessionHistory(sessionHistory);
   }, [sessionHistory]);
+
+  useEffect(() => {
+    let isActive = true;
+
+    fetchRuntimeHealth(runtimeMode)
+      .then((health) => {
+        if (isActive) {
+          setRuntimeHealth(health);
+        }
+      })
+      .catch(() => {
+        if (isActive) {
+          setRuntimeHealth(null);
+        }
+      });
+
+    return () => {
+      isActive = false;
+    };
+  }, [runtimeMode]);
 
   useEffect(() => {
     let isActive = true;
@@ -213,6 +234,7 @@ export default function NexusAgentPlatform() {
         {
           id: Date.now(),
           runtimeMode,
+          engine: result.engine || runtimeHealth?.defaultEngine || "local-simulation",
           task,
           time: new Date().toLocaleString("en-US"),
           finalOutput: result.finalOutput,
@@ -366,6 +388,20 @@ export default function NexusAgentPlatform() {
               </div>
             </div>
             <div style={{ padding: "10px", background: "#0c1018", border: "1px solid #141c28", borderRadius: 4 }}>
+              <div style={{ fontFamily: "'Share Tech Mono',monospace", fontSize: 8, color: "#2e3d4d", letterSpacing: "0.15em", marginBottom: 6, textTransform: "uppercase" }}>Runtime Health</div>
+              <div style={{ fontFamily: "'Share Tech Mono',monospace", fontSize: 9, color: "#364556", lineHeight: 1.5 }}>
+                {runtimeHealth ? (
+                  <>
+                    <div>Service: {runtimeHealth.service}</div>
+                    <div>Default engine: {runtimeHealth.defaultEngine}</div>
+                    <div>Engines: {runtimeHealth.engines.map((engine) => `${engine.label} (${engine.id})`).join(", ")}</div>
+                  </>
+                ) : (
+                  <div>Runtime health is unavailable.</div>
+                )}
+              </div>
+            </div>
+            <div style={{ padding: "10px", background: "#0c1018", border: "1px solid #141c28", borderRadius: 4 }}>
               <div style={{ fontFamily: "'Share Tech Mono',monospace", fontSize: 8, color: "#2e3d4d", letterSpacing: "0.15em", marginBottom: 6, textTransform: "uppercase" }}>Recent Sessions</div>
               <div style={{ display: "grid", gap: 8 }}>
                 {visibleSessions.length === 0 ? (
@@ -383,7 +419,7 @@ export default function NexusAgentPlatform() {
                       style={{ textAlign: "left", padding: "9px 11px", background: "#07090e", border: "1px solid #1a2530", borderRadius: 4, color: "#8fa0b0", cursor: "pointer", fontFamily: "'Share Tech Mono',monospace", fontSize: 9 }}
                     >
                       <div>{session.time}</div>
-                      <div>{session.runtimeMode.toUpperCase()} - {session.task.slice(0, 48)}{session.task.length > 48 ? "..." : ""}</div>
+                      <div>{session.runtimeMode.toUpperCase()} {session.engine ? `- ${session.engine}` : ""} - {session.task.slice(0, 48)}{session.task.length > 48 ? "..." : ""}</div>
                     </button>
                   ))
                 )}
