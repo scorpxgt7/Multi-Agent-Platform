@@ -59,6 +59,8 @@ external model provider.
 - `.github/workflows/deploy-pages.yml` now builds and deploys the Vite app to
   GitHub Pages on every push to `main`.
 - In repository settings, set Pages to use `GitHub Actions` as the source.
+- As a branch-root fallback, `index.html` now redirects GitHub Pages traffic to
+  a committed `docs/` build when the site is served from the repository itself.
 
 ## Phase 5 notes
 
