@@ -92,3 +92,5 @@ external model provider.
   backend engines.
 - The frontend surfaces runtime health so backend mode reports which execution
   engine is active.
+- Operators can now choose the active engine from the UI and keep a lightweight
+  approval gate enabled before dispatching runs.

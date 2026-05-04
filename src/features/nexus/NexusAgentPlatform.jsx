@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { AGENT_COLORS, DEFAULT_AGENTS, EMPTY_STATUSES, STATUS_COLOR, TASK_PRESETS } from "./data.js";
 import { RUNTIME_OPTIONS, fetchRunDetailForRuntime, fetchRunsForRuntime, fetchRuntimeHealth, runPipelineWithRuntime } from "./runtime/client.js";
-import { loadRuntimeMode, loadSessionHistory, saveRuntimeMode, saveSessionHistory } from "./storage.js";
+import { loadApprovalGate, loadRuntimeMode, loadSelectedEngine, loadSessionHistory, saveApprovalGate, saveRuntimeMode, saveSelectedEngine, saveSessionHistory } from "./storage.js";
 
 function AgentNode({ name, role, status, size = "sm", onClick }) {
   const color = STATUS_COLOR[status] || STATUS_COLOR.idle;
@@ -100,6 +100,8 @@ export default function NexusAgentPlatform() {
   const [finalOutput, setFinalOutput] = useState("");
   const [activeTab, setActiveTab] = useState("log");
   const [runtimeMode, setRuntimeMode] = useState(() => loadRuntimeMode());
+  const [selectedEngine, setSelectedEngine] = useState(() => loadSelectedEngine());
+  const [approvalRequired, setApprovalRequired] = useState(() => loadApprovalGate());
   const [runtimeHealth, setRuntimeHealth] = useState(null);
   const [sessionHistory, setSessionHistory] = useState(() => loadSessionHistory());
   const [backendRuns, setBackendRuns] = useState([]);
@@ -125,6 +127,14 @@ export default function NexusAgentPlatform() {
   }, [runtimeMode]);
 
   useEffect(() => {
+    saveSelectedEngine(selectedEngine);
+  }, [selectedEngine]);
+
+  useEffect(() => {
+    saveApprovalGate(approvalRequired);
+  }, [approvalRequired]);
+
+  useEffect(() => {
     saveSessionHistory(sessionHistory);
   }, [sessionHistory]);
 
@@ -147,6 +157,17 @@ export default function NexusAgentPlatform() {
       isActive = false;
     };
   }, [runtimeMode]);
+
+  useEffect(() => {
+    if (!runtimeHealth?.engines?.length) {
+      return;
+    }
+
+    const engineExists = runtimeHealth.engines.some((engine) => engine.id === selectedEngine);
+    if (!engineExists) {
+      setSelectedEngine(runtimeHealth.defaultEngine);
+    }
+  }, [runtimeHealth, selectedEngine]);
 
   useEffect(() => {
     let isActive = true;
@@ -213,6 +234,12 @@ export default function NexusAgentPlatform() {
 
   const runPipeline = async () => {
     if (!task.trim() || running) return;
+    if (approvalRequired) {
+      const approved = window.confirm(`Dispatch this task to the ${runtimeMode} runtime${runtimeMode === "backend" ? ` using engine "${selectedEngine}"` : ""}?\n\n${task}`);
+      if (!approved) {
+        return;
+      }
+    }
 
     setRunning(true);
     resetAll();
@@ -220,7 +247,7 @@ export default function NexusAgentPlatform() {
     const activeAgents = agentsRef.current;
 
     try {
-      const result = await runPipelineWithRuntime(runtimeMode, { task, agents: activeAgents });
+      const result = await runPipelineWithRuntime(runtimeMode, { task, agents: activeAgents, engine: selectedEngine });
       result.statuses.forEach((entry) => {
         setStatus(entry.id, entry.status);
       });
@@ -365,6 +392,25 @@ export default function NexusAgentPlatform() {
                 ))}
               </select>
             </div>
+            <div>
+              <div style={{ fontFamily: "'Share Tech Mono',monospace", fontSize: 8, color: "#2e3d4d", letterSpacing: "0.15em", textTransform: "uppercase", marginBottom: 6 }}>Execution Engine</div>
+              <select
+                value={selectedEngine}
+                onChange={(event) => setSelectedEngine(event.target.value)}
+                disabled={running || !runtimeHealth?.engines?.length}
+                style={{ width: "100%", background: "#0b0e15", border: "1px solid #1a2530", borderRadius: 4, color: "#8fa0b0", padding: "9px 11px", fontFamily: "'Share Tech Mono',monospace", fontSize: 10 }}
+              >
+                {(runtimeHealth?.engines || []).map((engine) => (
+                  <option key={engine.id} value={engine.id}>{engine.label}</option>
+                ))}
+              </select>
+            </div>
+            <label style={{ display: "flex", alignItems: "center", gap: 8, padding: "10px", background: "#0c1018", border: "1px solid #141c28", borderRadius: 4, cursor: "pointer" }}>
+              <input type="checkbox" checked={approvalRequired} onChange={(event) => setApprovalRequired(event.target.checked)} disabled={running} />
+              <span style={{ fontFamily: "'Share Tech Mono',monospace", fontSize: 9, color: "#8fa0b0", lineHeight: 1.5 }}>
+                Require operator approval before dispatch
+              </span>
+            </label>
             <div style={{ display: "grid", gap: 8 }}>
               {TASK_PRESETS.map((preset) => (
                 <button key={preset.label} type="button" disabled={running} onClick={() => setTask(preset.task)} style={{ textAlign: "left", padding: "9px 11px", background: "#0b0e15", border: "1px solid #1a2530", borderRadius: 4, color: "#8fa0b0", cursor: "pointer", fontFamily: "'Share Tech Mono',monospace", fontSize: 10 }}>
@@ -394,6 +440,7 @@ export default function NexusAgentPlatform() {
                   <>
                     <div>Service: {runtimeHealth.service}</div>
                     <div>Default engine: {runtimeHealth.defaultEngine}</div>
+                    <div>Selected engine: {selectedEngine}</div>
                     <div>Engines: {runtimeHealth.engines.map((engine) => `${engine.label} (${engine.id})`).join(", ")}</div>
                   </>
                 ) : (
