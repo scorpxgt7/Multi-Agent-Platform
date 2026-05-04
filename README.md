@@ -66,3 +66,10 @@ external model provider.
 - `GET /api/nexus/runs` exposes saved backend runs for the frontend session list.
 - Backend mode now has both execution and persisted history, rather than relying
   only on browser-local session storage.
+
+## Agent roles
+
+- The five-agent structure remains stable for compatibility.
+- Each role now includes an advanced skill stack and expected deliverable.
+- Those skill profiles are visible in the UI and are used in runtime-generated
+  plans, directives, and specialist outputs.

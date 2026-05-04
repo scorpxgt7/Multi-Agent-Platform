@@ -66,6 +66,22 @@ function AgentEditor({ agent, color, onSave, onCancel }) {
         <div style={{ fontFamily: "'Share Tech Mono',monospace", fontSize: 9, color: "#364556", marginBottom: 5, textTransform: "uppercase", letterSpacing: "0.08em" }}>Description</div>
         <textarea {...inputProps("description")} rows={3} style={{ ...inputProps("description").style, resize: "vertical" }} />
       </div>
+      <div>
+        <div style={{ fontFamily: "'Share Tech Mono',monospace", fontSize: 9, color: "#364556", marginBottom: 5, textTransform: "uppercase", letterSpacing: "0.08em" }}>Advanced skill stack</div>
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+          {(agent.advancedSkills || []).map((skill) => (
+            <span key={skill} style={{ border: `1px solid ${color}55`, background: `${color}12`, borderRadius: 999, padding: "4px 8px", color, fontFamily: "'Share Tech Mono',monospace", fontSize: 9 }}>
+              {skill}
+            </span>
+          ))}
+        </div>
+      </div>
+      <div>
+        <div style={{ fontFamily: "'Share Tech Mono',monospace", fontSize: 9, color: "#364556", marginBottom: 5, textTransform: "uppercase", letterSpacing: "0.08em" }}>Expected deliverable</div>
+        <div style={{ width: "100%", background: "#070a0e", border: "1px solid #1a2530", borderRadius: 3, color: "#8fa0b0", padding: "7px 10px", fontFamily: "'Share Tech Mono',monospace", fontSize: 11, lineHeight: 1.5 }}>
+          {agent.deliverable || "Specialist output"}
+        </div>
+      </div>
       <div style={{ display: "flex", gap: 8, marginTop: 4 }}>
         <button onClick={() => onSave(form)} style={{ flex: 1, padding: "8px 0", background: `${color}12`, border: `1px solid ${color}50`, borderRadius: 3, color, cursor: "pointer", fontFamily: "Rajdhani,sans-serif", fontWeight: 700, fontSize: 12, letterSpacing: "0.1em", textTransform: "uppercase" }}>Save agent</button>
         <button onClick={onCancel} style={{ padding: "8px 14px", background: "transparent", border: "1px solid #1a2530", borderRadius: 3, color: "#4a5870", cursor: "pointer", fontFamily: "Rajdhani,sans-serif", fontWeight: 600, fontSize: 12, textTransform: "uppercase" }}>Cancel</button>
@@ -273,6 +289,23 @@ export default function NexusAgentPlatform() {
             <div style={{ display: "flex", justifyContent: "space-between", padding: "0 2px" }}>
               {agents.map((agent, index) => (
                 <AgentNode key={agent.id} name={agent.name} role={agent.specialty} status={statuses[agent.id]} size="sm" onClick={() => !running && (setShowConfig(true), setEditAgent({ ...agent, colorIndex: index }))} />
+              ))}
+            </div>
+            <div style={{ marginTop: 12, display: "grid", gap: 8 }}>
+              {agents.map((agent, index) => (
+                <div key={`${agent.id}-skills`} style={{ border: "1px solid #141c28", borderRadius: 6, padding: "8px 10px", background: "#0a0d14" }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
+                    <div style={{ width: 8, height: 8, borderRadius: "50%", background: AGENT_COLORS[index], flexShrink: 0 }} />
+                    <div style={{ fontFamily: "'Share Tech Mono',monospace", fontSize: 9, color: "#8fa0b0", textTransform: "uppercase" }}>{agent.name}</div>
+                  </div>
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                    {(agent.advancedSkills || []).map((skill) => (
+                      <span key={skill} style={{ border: `1px solid ${AGENT_COLORS[index]}44`, background: `${AGENT_COLORS[index]}12`, borderRadius: 999, padding: "3px 7px", color: AGENT_COLORS[index], fontFamily: "'Share Tech Mono',monospace", fontSize: 8 }}>
+                        {skill}
+                      </span>
+                    ))}
+                  </div>
+                </div>
               ))}
             </div>
           </div>

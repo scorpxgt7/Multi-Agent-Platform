@@ -12,6 +12,12 @@ function summarizeTask(task, fallback = "the requested workflow") {
   return summary.length > 180 ? `${summary.slice(0, 177)}...` : summary;
 }
 
+function formatSkills(agent) {
+  return Array.isArray(agent.advancedSkills) && agent.advancedSkills.length
+    ? agent.advancedSkills.join(", ")
+    : "general problem solving";
+}
+
 export function buildDirectiveMap(task, agents) {
   const summary = summarizeTask(task);
   const directives = {};
@@ -20,7 +26,7 @@ export function buildDirectiveMap(task, agents) {
     const handoff = index === 0
       ? "Start the chain with a strong factual baseline."
       : "Use previous agent output as working context and improve it with your specialty.";
-    directives[agent.name] = `For ${summary}, focus on ${agent.specialty.toLowerCase()}. ${agent.description} ${handoff}`;
+    directives[agent.name] = `For ${summary}, focus on ${agent.specialty.toLowerCase()}. Use advanced skills in ${formatSkills(agent)}. ${agent.description} ${handoff}`;
   });
 
   return directives;
@@ -28,7 +34,7 @@ export function buildDirectiveMap(task, agents) {
 
 function buildManagerPlan(task, agents) {
   const summary = summarizeTask(task);
-  const teamFocus = agents.map((agent, index) => `${index + 1}. ${agent.name}: ${agent.specialty} - ${agent.description}`).join("\n");
+  const teamFocus = agents.map((agent, index) => `${index + 1}. ${agent.name}: ${agent.specialty} - ${agent.description}. Advanced skills: ${formatSkills(agent)}. Deliverable: ${agent.deliverable || "specialist output"}.`).join("\n");
 
   return [
     `Objective: deliver a complete result for ${summary}.`,
@@ -53,13 +59,16 @@ function buildSupervisorBrief(task, agents, directiveMap) {
 function buildAgentContribution(task, agent, directive, previousOutputs) {
   const summary = summarizeTask(task);
   const previousNames = previousOutputs.map((entry) => entry.name);
+  const deliverable = agent.deliverable || `${agent.specialty.toLowerCase()} output`;
 
   return [
     `Focus area: ${agent.specialty}`,
+    `Advanced skills: ${formatSkills(agent)}`,
+    `Expected deliverable: ${deliverable}`,
     `Directive: ${directive}`,
     `Context used: ${previousNames.length ? previousNames.join(", ") : "No prior agent context yet."}`,
-    `Contribution: For ${summary}, ${agent.name} should produce a practical ${agent.specialty.toLowerCase()} output that directly helps the team move toward a final deliverable.`,
-    `Execution notes: ${agent.description} Keep the contribution actionable, compact, and easy for the next handoff to reuse.`,
+    `Contribution: For ${summary}, ${agent.name} should produce a practical ${deliverable} that directly helps the team move toward a final deliverable.`,
+    `Execution notes: ${agent.description} Apply ${formatSkills(agent)} in a way that keeps the contribution actionable, compact, and easy for the next handoff to reuse.`,
     "Handoff guidance: Preserve the strongest points, remove duplication, and elevate anything that reduces execution risk or improves clarity.",
   ].join("\n\n");
 }
