@@ -56,6 +56,83 @@ function summarizeChecks(checks) {
   };
 }
 
+function buildSuggestedActions(checks) {
+  const actions = [];
+
+  for (const check of checks) {
+    if (check.status === "pass") {
+      continue;
+    }
+
+    if (check.key === "persistence") {
+      actions.push({
+        id: `action-${check.key}`,
+        priority: check.status === "fail" ? "high" : "medium",
+        sourceCheck: check.key,
+        title: "Stabilize backend persistence",
+        summary: "Verify Python bridge execution in the target environment or accept JSON fallback explicitly for this deployment tier.",
+      });
+      continue;
+    }
+
+    if (check.key === "default_engine") {
+      actions.push({
+        id: `action-${check.key}`,
+        priority: "high",
+        sourceCheck: check.key,
+        title: "Correct default engine configuration",
+        summary: "Set NEXUS_ENGINE to a known available engine before enabling production backend traffic.",
+      });
+      continue;
+    }
+
+    if (check.key === "recent_run_failures") {
+      actions.push({
+        id: `action-${check.key}`,
+        priority: "medium",
+        sourceCheck: check.key,
+        title: "Review recent failed runs",
+        summary: "Inspect the recent failed run records and classify whether they are engine, task, or infrastructure issues.",
+      });
+      continue;
+    }
+
+    if (check.key === "diagnostic_errors") {
+      actions.push({
+        id: `action-${check.key}`,
+        priority: "medium",
+        sourceCheck: check.key,
+        title: "Triage backend diagnostic errors",
+        summary: "Review the recent diagnostic error events and clear the root cause before scaling usage.",
+      });
+      continue;
+    }
+
+    if (check.key === "frontend_origin_alignment") {
+      actions.push({
+        id: `action-${check.key}`,
+        priority: "medium",
+        sourceCheck: check.key,
+        title: "Align frontend and backend origin settings",
+        summary: "Update PUBLIC_APP_URL or the CORS allowlist so the deployed frontend origin is explicitly supported.",
+      });
+      continue;
+    }
+
+    if (check.key === "config_advisories") {
+      actions.push({
+        id: `action-${check.key}`,
+        priority: "medium",
+        sourceCheck: check.key,
+        title: "Resolve deployment advisories",
+        summary: "Address the current backend config advisories before calling this deployment production-ready.",
+      });
+    }
+  }
+
+  return actions;
+}
+
 export async function runMaintenanceReview({ source = "manual" } = {}) {
   const config = loadConfig();
   const [persistence, engines, diagnostics, runs, latestReview] = await Promise.all([
@@ -147,6 +224,7 @@ export async function runMaintenanceReview({ source = "manual" } = {}) {
   ];
 
   const summary = summarizeChecks(checks);
+  const suggestedActions = buildSuggestedActions(checks);
   const review = {
     id: crypto.randomUUID(),
     time: new Date().toISOString(),
@@ -157,6 +235,7 @@ export async function runMaintenanceReview({ source = "manual" } = {}) {
     warningCount: checks.filter((check) => check.status === "warn").length,
     failureCount: checks.filter((check) => check.status === "fail").length,
     checks,
+    suggestedActions,
     persistence,
     diagnosticsSnapshot: {
       recentEventCount: diagnostics.recentEventCount,
@@ -186,6 +265,7 @@ export async function runMaintenanceReview({ source = "manual" } = {}) {
       source: review.source,
       warningCount: review.warningCount,
       failureCount: review.failureCount,
+      suggestedActionCount: review.suggestedActions.length,
     },
   });
 

@@ -755,7 +755,7 @@ export default function NexusAgentPlatform() {
                       maintenanceReviews.map((review) => (
                         <div key={review.id} style={{ background: "#07090e", border: "1px solid #1a2530", borderRadius: 4, padding: "8px 10px" }}>
                           <div style={{ color: review.status === "fail" ? "#ef4444" : review.status === "warn" ? "#f59e0b" : "#10b981", fontFamily: "'Share Tech Mono',monospace", fontSize: 8, textTransform: "uppercase", marginBottom: 3 }}>
-                            {review.status} · {review.source}
+                            {review.status} | {review.source}
                           </div>
                           <div style={{ color: "#8fa0b0", fontFamily: "'Share Tech Mono',monospace", fontSize: 8, marginBottom: 3 }}>
                             {review.time}
@@ -763,6 +763,23 @@ export default function NexusAgentPlatform() {
                           <div style={{ color: "#364556", fontFamily: "'Share Tech Mono',monospace", fontSize: 8, lineHeight: 1.5 }}>
                             {review.summary}
                           </div>
+                          {Array.isArray(review.suggestedActions) && review.suggestedActions.length > 0 && (
+                            <div style={{ display: "grid", gap: 4, marginTop: 6 }}>
+                              {review.suggestedActions.slice(0, 2).map((action) => (
+                                <div key={action.id} style={{ background: "#0b0e15", border: "1px solid #141c28", borderRadius: 4, padding: "6px 8px" }}>
+                                  <div style={{ color: action.priority === "high" ? "#ef4444" : "#f59e0b", fontFamily: "'Share Tech Mono',monospace", fontSize: 8, textTransform: "uppercase", marginBottom: 2 }}>
+                                    {action.priority} action
+                                  </div>
+                                  <div style={{ color: "#8fa0b0", fontFamily: "'Share Tech Mono',monospace", fontSize: 8, marginBottom: 2 }}>
+                                    {action.title}
+                                  </div>
+                                  <div style={{ color: "#364556", fontFamily: "'Share Tech Mono',monospace", fontSize: 8, lineHeight: 1.5 }}>
+                                    {action.summary}
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          )}
                         </div>
                       ))
                     )}

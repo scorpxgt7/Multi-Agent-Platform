@@ -158,5 +158,8 @@ external model provider.
   with either `MAINTENANCE_DAILY_UTC` or `MAINTENANCE_INTERVAL_MINUTES`.
 - The frontend now surfaces maintenance review history and backend config
   advisories so deployment-risk conditions are visible to operators.
+- Maintenance reviews now generate structured remediation suggestions, but they
+  remain operator-approved recommendations rather than automatic backend or code
+  changes.
 - This is the groundwork for a future scheduled reviewer system, but no
   autonomous fixer is enabled yet.
