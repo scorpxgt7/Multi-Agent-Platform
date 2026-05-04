@@ -12,9 +12,6 @@
       const isDirectFileOpen = window.location.protocol === "file:";
       const isBuiltEntry = /[\\\/]dist[\\\/]index\.html$/i.test(window.location.pathname);
       const isDocsEntry = /\/docs\/?$|\/docs\/index\.html$/i.test(window.location.pathname);
-      if (isGitHubPagesHost && !isDocsEntry) {
-        window.location.replace("./docs/");
-      }
       if (isDirectFileOpen && !isBuiltEntry && !isDocsEntry) {
         const root = document.getElementById("root");
         root.innerHTML = `
@@ -30,6 +27,30 @@
         `;
       }
     </script>
-    <script type="module" src="./src/main.jsx"></script>
+    <script>
+      if (!isDirectFileOpen || isBuiltEntry || isDocsEntry) {
+        const moduleScript = document.createElement("script");
+        moduleScript.type = "module";
+        let stylesheetHref = "";
+
+        if (isGitHubPagesHost && !isDocsEntry) {
+          stylesheetHref = "./docs/assets/app.css";
+          moduleScript.src = "./docs/assets/app.js";
+        } else if (isBuiltEntry) {
+          stylesheetHref = "./assets/app.css";
+          moduleScript.src = "./assets/app.js";
+        } else {
+          moduleScript.src = "/src/main.jsx";
+        }
+
+        if (stylesheetHref) {
+          const stylesheet = document.createElement("link");
+          stylesheet.rel = "stylesheet";
+          stylesheet.href = stylesheetHref;
+          document.head.appendChild(stylesheet);
+        }
+        document.body.appendChild(moduleScript);
+      }
+    </script>
   </body>
 </html>

@@ -1,9 +1,13 @@
+import path from "node:path";
 import { defineConfig } from "vite";
 
 export default defineConfig({
   base: process.env.GITHUB_ACTIONS ? "/Multi-Agent-Platform/" : "./",
   build: {
     rollupOptions: {
+      input: {
+        index: path.resolve("app.html"),
+      },
       output: {
         entryFileNames: "assets/app.js",
         chunkFileNames: "assets/[name].js",

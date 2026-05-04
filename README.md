@@ -6,6 +6,10 @@ external model provider.
 
 ## Current structure
 
+- `index.html`
+  Root bootstrap page for local development and legacy GitHub Pages root hosting.
+- `app.html`
+  Dedicated Vite build entry that compiles the React app into deployable HTML.
 - `src/features/nexus/NexusAgentPlatform.jsx`
   Canonical platform shell used by the app.
 - `src/features/nexus/runtime/localRuntime.js`
@@ -55,11 +59,11 @@ external model provider.
 ## GitHub Pages
 
 - The repository currently works with GitHub Pages' legacy branch deployment by
-  redirecting the root page to the committed `docs/` build.
+  bootstrapping the committed `docs/` build from the repository root page.
 - `.github/workflows/deploy-pages.yml` now builds and deploys the Vite app to
   GitHub Pages on every push to `main`.
-- As a branch-root fallback, `index.html` now redirects GitHub Pages traffic to
-  a committed `docs/` build when the site is served from the repository itself.
+- As a branch-root fallback, `index.html` now bootstraps the committed `docs/`
+  build when the site is served from the repository root on GitHub Pages.
 - The `docs/` build now uses stable asset names so stale cached HTML does not
   break the site when new commits are pushed.
 

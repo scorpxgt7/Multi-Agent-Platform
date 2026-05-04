@@ -6,8 +6,8 @@
   "scripts": {
     "dev": "vite",
     "backend": "node backend/server.js",
-    "build": "vite build",
-    "build:docs": "vite build --outDir docs",
+    "build": "vite build && node scripts/write-build-index.mjs dist",
+    "build:docs": "vite build --outDir docs && node scripts/write-build-index.mjs docs",
     "preview": "vite preview"
   },
   "dependencies": {
