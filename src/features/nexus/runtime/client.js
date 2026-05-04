@@ -1,4 +1,4 @@
-import { fetchBackendRuns, runBackendPipeline } from "./backendRuntime.js";
+import { fetchBackendRunDetail, fetchBackendRuns, runBackendPipeline } from "./backendRuntime.js";
 import { runLocalPipeline } from "./localRuntime.js";
 
 export const RUNTIME_OPTIONS = [
@@ -20,4 +20,12 @@ export async function fetchRunsForRuntime(runtimeMode) {
   }
 
   return [];
+}
+
+export async function fetchRunDetailForRuntime(runtimeMode, runId) {
+  if (runtimeMode === "backend") {
+    return fetchBackendRunDetail(runId);
+  }
+
+  return null;
 }

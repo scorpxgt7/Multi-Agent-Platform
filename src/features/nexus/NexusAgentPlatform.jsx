@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { AGENT_COLORS, DEFAULT_AGENTS, EMPTY_STATUSES, STATUS_COLOR, TASK_PRESETS } from "./data.js";
-import { RUNTIME_OPTIONS, fetchRunsForRuntime, runPipelineWithRuntime } from "./runtime/client.js";
+import { RUNTIME_OPTIONS, fetchRunDetailForRuntime, fetchRunsForRuntime, runPipelineWithRuntime } from "./runtime/client.js";
 import { loadRuntimeMode, loadSessionHistory, saveRuntimeMode, saveSessionHistory } from "./storage.js";
 
 function AgentNode({ name, role, status, size = "sm", onClick }) {
@@ -102,6 +102,7 @@ export default function NexusAgentPlatform() {
   const [runtimeMode, setRuntimeMode] = useState(() => loadRuntimeMode());
   const [sessionHistory, setSessionHistory] = useState(() => loadSessionHistory());
   const [backendRuns, setBackendRuns] = useState([]);
+  const [selectedRunArtifacts, setSelectedRunArtifacts] = useState([]);
   const [showConfig, setShowConfig] = useState(false);
   const [editAgent, setEditAgent] = useState(null);
   const logRef = useRef(null);
@@ -222,6 +223,7 @@ export default function NexusAgentPlatform() {
         const runs = await fetchRunsForRuntime("backend");
         setBackendRuns(runs);
       }
+      setSelectedRunArtifacts([]);
     } catch (error) {
       addLog("SYSTEM", `Error: ${error.message}`, "error");
       setPhase("error");
@@ -233,6 +235,27 @@ export default function NexusAgentPlatform() {
   const phaseLabel = phase === "complete" ? "COMPLETE" : phase === "error" ? "ERROR" : running ? "ACTIVE" : "STANDBY";
   const phaseDot = phase === "complete" ? "#10b981" : phase === "error" ? "#ef4444" : running ? "#f59e0b" : "#252f3a";
   const visibleSessions = runtimeMode === "backend" ? backendRuns : sessionHistory;
+  const openSavedSession = async (session) => {
+    setTask(session.task);
+    setFinalOutput(session.finalOutput);
+    setActiveTab("output");
+
+    if (runtimeMode !== "backend") {
+      setSelectedRunArtifacts([]);
+      return;
+    }
+
+    try {
+      const detail = await fetchRunDetailForRuntime("backend", session.id);
+      setLog(detail.entries || []);
+      setSelectedRunArtifacts(detail.artifacts || []);
+      setPhase("complete");
+    } catch (error) {
+      addLog("SYSTEM", `Error: ${error.message}`, "error");
+      setSelectedRunArtifacts([]);
+      setPhase("error");
+    }
+  };
 
   return (
     <div style={{ fontFamily: "Rajdhani,sans-serif", background: "#06080c", minHeight: "100vh", color: "#c0cdd8", display: "flex", flexDirection: "column", overflow: "hidden" }}>
@@ -355,15 +378,37 @@ export default function NexusAgentPlatform() {
                       key={session.id}
                       type="button"
                       onClick={() => {
-                        setTask(session.task);
-                        setFinalOutput(session.finalOutput);
-                        setActiveTab("output");
+                        void openSavedSession(session);
                       }}
                       style={{ textAlign: "left", padding: "9px 11px", background: "#07090e", border: "1px solid #1a2530", borderRadius: 4, color: "#8fa0b0", cursor: "pointer", fontFamily: "'Share Tech Mono',monospace", fontSize: 9 }}
                     >
                       <div>{session.time}</div>
                       <div>{session.runtimeMode.toUpperCase()} - {session.task.slice(0, 48)}{session.task.length > 48 ? "..." : ""}</div>
                     </button>
+                  ))
+                )}
+              </div>
+            </div>
+            <div style={{ padding: "10px", background: "#0c1018", border: "1px solid #141c28", borderRadius: 4 }}>
+              <div style={{ fontFamily: "'Share Tech Mono',monospace", fontSize: 8, color: "#2e3d4d", letterSpacing: "0.15em", marginBottom: 6, textTransform: "uppercase" }}>Run Artifacts</div>
+              <div style={{ display: "grid", gap: 8 }}>
+                {selectedRunArtifacts.length === 0 ? (
+                  <div style={{ fontFamily: "'Share Tech Mono',monospace", fontSize: 9, color: "#364556", lineHeight: 1.5 }}>
+                    Open a backend run to inspect per-agent artifacts.
+                  </div>
+                ) : (
+                  selectedRunArtifacts.map((artifact, index) => (
+                    <div key={`${artifact.agentId}-${index}`} style={{ background: "#07090e", border: "1px solid #1a2530", borderRadius: 4, padding: "9px 11px" }}>
+                      <div style={{ color: AGENT_COLORS[index % AGENT_COLORS.length], fontFamily: "'Share Tech Mono',monospace", fontSize: 9, textTransform: "uppercase", marginBottom: 4 }}>
+                        {artifact.name} - {artifact.deliverable}
+                      </div>
+                      <div style={{ color: "#8fa0b0", fontFamily: "'Share Tech Mono',monospace", fontSize: 8, marginBottom: 4 }}>
+                        Skills: {(artifact.skills || []).join(", ")}
+                      </div>
+                      <div style={{ color: "#364556", fontFamily: "'Share Tech Mono',monospace", fontSize: 8, lineHeight: 1.5 }}>
+                        {(artifact.output || "No output recorded.").slice(0, 180)}{artifact.output && artifact.output.length > 180 ? "..." : ""}
+                      </div>
+                    </div>
                   ))
                 )}
               </div>

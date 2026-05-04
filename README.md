@@ -75,3 +75,11 @@ external model provider.
 - Each role now includes an advanced skill stack and expected deliverable.
 - Those skill profiles are visible in the UI and are used in runtime-generated
   plans, directives, and specialist outputs.
+
+## Backend run inspection
+
+- Backend runs now persist richer artifacts, including per-agent outputs.
+- `GET /api/nexus/runs/:id` returns full run detail for reopening saved backend
+  executions.
+- The frontend can reopen backend runs with logs, final output, and artifact
+  previews instead of only showing shallow session summaries.

@@ -35,3 +35,19 @@ export async function fetchBackendRuns() {
 
   return payload.runs;
 }
+
+export async function fetchBackendRunDetail(runId) {
+  const response = await fetch(`/api/nexus/runs/${runId}`);
+
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(text || `Backend run detail request failed with status ${response.status}`);
+  }
+
+  const payload = await response.json();
+  if (!payload.run) {
+    throw new Error("Backend run detail response is invalid.");
+  }
+
+  return payload.run;
+}

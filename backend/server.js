@@ -52,6 +52,17 @@ async function saveRuns(runs) {
   await fs.writeFile(RUNS_PATH, JSON.stringify(runs.slice(0, 20), null, 2));
 }
 
+function buildRunSummary(run) {
+  return {
+    id: run.id,
+    runtimeMode: run.runtimeMode,
+    task: run.task,
+    time: run.time,
+    finalOutput: run.finalOutput,
+    artifactCount: Array.isArray(run.artifacts) ? run.artifacts.length : 0,
+  };
+}
+
 const server = http.createServer(async (request, response) => {
   if (!request.url) {
     sendJson(response, 400, { error: "Missing request URL." });
@@ -71,10 +82,29 @@ const server = http.createServer(async (request, response) => {
   if (request.method === "GET" && request.url === "/api/nexus/runs") {
     try {
       const runs = await loadRuns();
-      sendJson(response, 200, { runs });
+      sendJson(response, 200, { runs: runs.map(buildRunSummary) });
       return;
     } catch (error) {
       sendJson(response, 500, { error: error.message || "Failed to load runs." });
+      return;
+    }
+  }
+
+  if (request.method === "GET" && request.url.startsWith("/api/nexus/runs/")) {
+    try {
+      const runId = request.url.split("/").pop();
+      const runs = await loadRuns();
+      const run = runs.find((entry) => String(entry.id) === String(runId));
+
+      if (!run) {
+        sendJson(response, 404, { error: "Run not found." });
+        return;
+      }
+
+      sendJson(response, 200, { run });
+      return;
+    } catch (error) {
+      sendJson(response, 500, { error: error.message || "Failed to load run detail." });
       return;
     }
   }
@@ -97,13 +127,28 @@ const server = http.createServer(async (request, response) => {
 
       const result = await runLocalPipeline({ task, agents });
       const runs = await loadRuns();
-      runs.unshift({
+      const artifacts = agents.map((agent) => ({
+        agentId: agent.id,
+        name: agent.name,
+        specialty: agent.specialty,
+        deliverable: agent.deliverable || "specialist output",
+        skills: agent.advancedSkills || [],
+        output: result.collected?.[agent.name] || "",
+      }));
+      const runRecord = {
         id: Date.now(),
         runtimeMode: "backend",
         task,
         time: new Date().toLocaleString("en-US"),
         finalOutput: result.finalOutput,
-      });
+        entries: result.entries,
+        statuses: result.statuses,
+        managerPlan: result.managerPlan,
+        supervisorBrief: result.supervisorBrief,
+        synthesis: result.synthesis,
+        artifacts,
+      };
+      runs.unshift(runRecord);
       await saveRuns(runs);
       sendJson(response, 200, result);
       return;
