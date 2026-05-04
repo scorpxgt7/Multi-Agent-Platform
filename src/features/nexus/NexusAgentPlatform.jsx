@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { AGENT_COLORS, DEFAULT_AGENTS, EMPTY_STATUSES, STATUS_COLOR, TASK_PRESETS } from "./data.js";
-import { RUNTIME_OPTIONS, runPipelineWithRuntime } from "./runtime/client.js";
+import { RUNTIME_OPTIONS, fetchRunsForRuntime, runPipelineWithRuntime } from "./runtime/client.js";
 import { loadRuntimeMode, loadSessionHistory, saveRuntimeMode, saveSessionHistory } from "./storage.js";
 
 function AgentNode({ name, role, status, size = "sm", onClick }) {
@@ -85,6 +85,7 @@ export default function NexusAgentPlatform() {
   const [activeTab, setActiveTab] = useState("log");
   const [runtimeMode, setRuntimeMode] = useState(() => loadRuntimeMode());
   const [sessionHistory, setSessionHistory] = useState(() => loadSessionHistory());
+  const [backendRuns, setBackendRuns] = useState([]);
   const [showConfig, setShowConfig] = useState(false);
   const [editAgent, setEditAgent] = useState(null);
   const logRef = useRef(null);
@@ -108,6 +109,33 @@ export default function NexusAgentPlatform() {
   useEffect(() => {
     saveSessionHistory(sessionHistory);
   }, [sessionHistory]);
+
+  useEffect(() => {
+    let isActive = true;
+
+    if (runtimeMode !== "backend") {
+      setBackendRuns([]);
+      return () => {
+        isActive = false;
+      };
+    }
+
+    fetchRunsForRuntime("backend")
+      .then((runs) => {
+        if (isActive) {
+          setBackendRuns(runs);
+        }
+      })
+      .catch(() => {
+        if (isActive) {
+          setBackendRuns([]);
+        }
+      });
+
+    return () => {
+      isActive = false;
+    };
+  }, [runtimeMode]);
 
   const setStatus = useCallback((id, status) => {
     setStatuses((previous) => ({ ...previous, [id]: status }));
@@ -174,6 +202,10 @@ export default function NexusAgentPlatform() {
         },
         ...previous,
       ]);
+      if (runtimeMode === "backend") {
+        const runs = await fetchRunsForRuntime("backend");
+        setBackendRuns(runs);
+      }
     } catch (error) {
       addLog("SYSTEM", `Error: ${error.message}`, "error");
       setPhase("error");
@@ -184,6 +216,7 @@ export default function NexusAgentPlatform() {
 
   const phaseLabel = phase === "complete" ? "COMPLETE" : phase === "error" ? "ERROR" : running ? "ACTIVE" : "STANDBY";
   const phaseDot = phase === "complete" ? "#10b981" : phase === "error" ? "#ef4444" : running ? "#f59e0b" : "#252f3a";
+  const visibleSessions = runtimeMode === "backend" ? backendRuns : sessionHistory;
 
   return (
     <div style={{ fontFamily: "Rajdhani,sans-serif", background: "#06080c", minHeight: "100vh", color: "#c0cdd8", display: "flex", flexDirection: "column", overflow: "hidden" }}>
@@ -279,12 +312,12 @@ export default function NexusAgentPlatform() {
             <div style={{ padding: "10px", background: "#0c1018", border: "1px solid #141c28", borderRadius: 4 }}>
               <div style={{ fontFamily: "'Share Tech Mono',monospace", fontSize: 8, color: "#2e3d4d", letterSpacing: "0.15em", marginBottom: 6, textTransform: "uppercase" }}>Recent Sessions</div>
               <div style={{ display: "grid", gap: 8 }}>
-                {sessionHistory.length === 0 ? (
+                {visibleSessions.length === 0 ? (
                   <div style={{ fontFamily: "'Share Tech Mono',monospace", fontSize: 9, color: "#364556", lineHeight: 1.5 }}>
-                    No saved sessions yet.
+                    {runtimeMode === "backend" ? "No backend runs saved yet." : "No saved sessions yet."}
                   </div>
                 ) : (
-                  sessionHistory.slice(0, 4).map((session) => (
+                  visibleSessions.slice(0, 4).map((session) => (
                     <button
                       key={session.id}
                       type="button"

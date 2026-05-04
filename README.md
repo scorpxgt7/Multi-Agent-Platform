@@ -51,3 +51,18 @@ external model provider.
   development.
 - The backend currently uses the same orchestration logic as the local runtime,
   but it already matches the contract needed for a future model-backed service.
+
+## GitHub Pages
+
+- The live Pages site should be deployed from the built `dist/` output, not from
+  the repository root source files.
+- `.github/workflows/deploy-pages.yml` now builds and deploys the Vite app to
+  GitHub Pages on every push to `main`.
+- In repository settings, set Pages to use `GitHub Actions` as the source.
+
+## Phase 5 notes
+
+- The backend now persists completed runs to `backend/data/nexus-runs.json`.
+- `GET /api/nexus/runs` exposes saved backend runs for the frontend session list.
+- Backend mode now has both execution and persisted history, rather than relying
+  only on browser-local session storage.
