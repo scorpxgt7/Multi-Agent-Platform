@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { AGENT_COLORS, DEFAULT_AGENTS, EMPTY_STATUSES, STATUS_COLOR, TASK_PRESETS } from "./data.js";
 import { RUNTIME_OPTIONS, fetchRunDetailForRuntime, fetchRunsForRuntime, fetchRuntimeHealth, probeBackendRuntime, runPipelineWithRuntime } from "./runtime/client.js";
-import { loadApprovalGate, loadRuntimeMode, loadSelectedEngine, loadSessionHistory, saveApprovalGate, saveRuntimeMode, saveSelectedEngine, saveSessionHistory } from "./storage.js";
+import { loadApprovalGate, loadBackendBaseUrl, loadRuntimeMode, loadSelectedEngine, loadSessionHistory, saveApprovalGate, saveBackendBaseUrl, saveRuntimeMode, saveSelectedEngine, saveSessionHistory } from "./storage.js";
 
 function AgentNode({ name, role, status, size = "sm", onClick }) {
   const color = STATUS_COLOR[status] || STATUS_COLOR.idle;
@@ -131,6 +131,7 @@ export default function NexusAgentPlatform() {
   const [runtimeMode, setRuntimeMode] = useState(() => loadRuntimeMode());
   const [selectedEngine, setSelectedEngine] = useState(() => loadSelectedEngine());
   const [approvalRequired, setApprovalRequired] = useState(() => loadApprovalGate());
+  const [backendBaseUrl, setBackendBaseUrl] = useState(() => loadBackendBaseUrl());
   const [runtimeHealth, setRuntimeHealth] = useState(null);
   const [backendHealth, setBackendHealth] = useState(null);
   const [sessionHistory, setSessionHistory] = useState(() => loadSessionHistory());
@@ -167,13 +168,17 @@ export default function NexusAgentPlatform() {
   }, [approvalRequired]);
 
   useEffect(() => {
+    saveBackendBaseUrl(backendBaseUrl);
+  }, [backendBaseUrl]);
+
+  useEffect(() => {
     saveSessionHistory(sessionHistory);
   }, [sessionHistory]);
 
   useEffect(() => {
     let isActive = true;
 
-    fetchRuntimeHealth(runtimeMode)
+    fetchRuntimeHealth(runtimeMode, { baseUrl: backendBaseUrl })
       .then((health) => {
         if (isActive) {
           setRuntimeHealth(health);
@@ -188,12 +193,12 @@ export default function NexusAgentPlatform() {
     return () => {
       isActive = false;
     };
-  }, [runtimeMode]);
+  }, [runtimeMode, backendBaseUrl]);
 
   useEffect(() => {
     let isActive = true;
 
-    probeBackendRuntime().then((health) => {
+    probeBackendRuntime(backendBaseUrl).then((health) => {
       if (isActive) {
         setBackendHealth(health);
       }
@@ -202,7 +207,7 @@ export default function NexusAgentPlatform() {
     return () => {
       isActive = false;
     };
-  }, []);
+  }, [backendBaseUrl]);
 
   useEffect(() => {
     if (runtimeMode === "backend" && !backendHealth) {
@@ -236,7 +241,7 @@ export default function NexusAgentPlatform() {
       };
     }
 
-    fetchRunsForRuntime("backend")
+    fetchRunsForRuntime("backend", { baseUrl: backendBaseUrl })
       .then((runs) => {
         if (isActive) {
           setBackendRuns(runs);
@@ -251,7 +256,7 @@ export default function NexusAgentPlatform() {
     return () => {
       isActive = false;
     };
-  }, [runtimeMode]);
+  }, [runtimeMode, backendHealth, backendBaseUrl]);
 
   const setStatus = useCallback((id, status) => {
     setStatuses((previous) => ({ ...previous, [id]: status }));
@@ -305,7 +310,7 @@ export default function NexusAgentPlatform() {
     const startedAt = new Date().toISOString();
 
     try {
-      const result = await runPipelineWithRuntime(runtimeMode, { task, agents: activeAgents, engine: selectedEngine });
+      const result = await runPipelineWithRuntime(runtimeMode, { task, agents: activeAgents, engine: selectedEngine, baseUrl: backendBaseUrl });
       const completedAt = new Date().toISOString();
       result.statuses.forEach((entry) => {
         setStatus(entry.id, entry.status);
@@ -335,7 +340,7 @@ export default function NexusAgentPlatform() {
         ...previous,
       ]);
       if (runtimeMode === "backend") {
-        const runs = await fetchRunsForRuntime("backend");
+        const runs = await fetchRunsForRuntime("backend", { baseUrl: backendBaseUrl });
         setBackendRuns(runs);
       }
       setSelectedRunMeta({
@@ -421,7 +426,7 @@ export default function NexusAgentPlatform() {
     }
 
     try {
-      const detail = await fetchRunDetailForRuntime("backend", session.id);
+      const detail = await fetchRunDetailForRuntime("backend", session.id, { baseUrl: backendBaseUrl });
       setLog(detail.entries || []);
       setSelectedRunArtifacts(detail.artifacts || []);
       setSelectedRunMeta({
@@ -545,6 +550,16 @@ export default function NexusAgentPlatform() {
                 </select>
               </div>
             )}
+            <div>
+              <div style={{ fontFamily: "'Share Tech Mono',monospace", fontSize: 8, color: "#2e3d4d", letterSpacing: "0.15em", textTransform: "uppercase", marginBottom: 6 }}>Backend Endpoint</div>
+              <input
+                value={backendBaseUrl}
+                onChange={(event) => setBackendBaseUrl(event.target.value)}
+                disabled={running}
+                placeholder="Optional hosted backend, e.g. https://api.example.com"
+                style={{ width: "100%", background: "#0b0e15", border: "1px solid #1a2530", borderRadius: 4, color: "#8fa0b0", padding: "9px 11px", fontFamily: "'Share Tech Mono',monospace", fontSize: 10, outline: "none" }}
+              />
+            </div>
             <label style={{ display: "flex", alignItems: "center", gap: 8, padding: "10px", background: "#0c1018", border: "1px solid #141c28", borderRadius: 4, cursor: "pointer" }}>
               <input type="checkbox" checked={approvalRequired} onChange={(event) => setApprovalRequired(event.target.checked)} disabled={running} />
               <span style={{ fontFamily: "'Share Tech Mono',monospace", fontSize: 9, color: "#8fa0b0", lineHeight: 1.5 }}>
@@ -586,14 +601,15 @@ export default function NexusAgentPlatform() {
                 {runtimeMode === "backend" && runtimeHealth ? (
                   <>
                     <div>Service: {runtimeHealth.service}</div>
+                    <div>Endpoint: {backendBaseUrl.trim() || "same-origin /api"}</div>
                     <div>Default engine: {runtimeHealth.defaultEngine}</div>
                     <div>Selected engine: {selectedEngine}</div>
                     <div>Available engines: {availableBackendEngines.length ? availableBackendEngines.map((engine) => `${engine.label} (${engine.id})`).join(", ") : "None detected"}</div>
                   </>
                 ) : backendHealth ? (
-                  <div>Backend adapter detected. Switch runtime mode to use server-backed execution.</div>
+                  <div>Backend adapter detected at {backendBaseUrl.trim() || "same-origin /api"}. Switch runtime mode to use server-backed execution.</div>
                 ) : (
-                  <div>Public mode is running local simulation only. Backend controls stay hidden until a server is reachable.</div>
+                  <div>Public mode is running local simulation only. Add a backend endpoint or keep same-origin /api to expose server-backed execution.</div>
                 )}
               </div>
             </div>

@@ -1,3 +1,21 @@
+function normalizeBackendBaseUrl(baseUrl) {
+  if (typeof baseUrl !== "string") {
+    return "";
+  }
+
+  const trimmed = baseUrl.trim().replace(/\/+$/, "");
+  if (!trimmed) {
+    return "";
+  }
+
+  return trimmed.endsWith("/api") ? trimmed : `${trimmed}/api`;
+}
+
+function createApiUrl(path, baseUrl = "") {
+  const normalizedBaseUrl = normalizeBackendBaseUrl(baseUrl);
+  return normalizedBaseUrl ? `${normalizedBaseUrl}${path}` : `/api${path}`;
+}
+
 async function readApiError(response, fallbackMessage) {
   try {
     const payload = await response.json();
@@ -16,8 +34,8 @@ async function readApiError(response, fallbackMessage) {
   }
 }
 
-export async function runBackendPipeline({ task, agents, engine = "local-simulation" }) {
-  const response = await fetch("/api/nexus/run", {
+export async function runBackendPipeline({ task, agents, engine = "local-simulation", baseUrl = "" }) {
+  const response = await fetch(createApiUrl("/nexus/run", baseUrl), {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -37,8 +55,8 @@ export async function runBackendPipeline({ task, agents, engine = "local-simulat
   return payload;
 }
 
-export async function fetchBackendHealth() {
-  const response = await fetch("/api/health");
+export async function fetchBackendHealth(baseUrl = "") {
+  const response = await fetch(createApiUrl("/health", baseUrl));
 
   if (!response.ok) {
     throw new Error(await readApiError(response, `Backend health request failed with status ${response.status}`));
@@ -52,8 +70,8 @@ export async function fetchBackendHealth() {
   return payload;
 }
 
-export async function fetchBackendRuns() {
-  const response = await fetch("/api/nexus/runs");
+export async function fetchBackendRuns(baseUrl = "") {
+  const response = await fetch(createApiUrl("/nexus/runs", baseUrl));
 
   if (!response.ok) {
     throw new Error(await readApiError(response, `Backend runs request failed with status ${response.status}`));
@@ -67,8 +85,8 @@ export async function fetchBackendRuns() {
   return payload.runs;
 }
 
-export async function fetchBackendRunDetail(runId) {
-  const response = await fetch(`/api/nexus/runs/${runId}`);
+export async function fetchBackendRunDetail(runId, baseUrl = "") {
+  const response = await fetch(createApiUrl(`/nexus/runs/${runId}`, baseUrl));
 
   if (!response.ok) {
     throw new Error(await readApiError(response, `Backend run detail request failed with status ${response.status}`));

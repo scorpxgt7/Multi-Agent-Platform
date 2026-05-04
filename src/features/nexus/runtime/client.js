@@ -14,25 +14,25 @@ export async function runPipelineWithRuntime(runtimeMode, payload) {
   return runLocalPipeline(payload);
 }
 
-export async function fetchRunsForRuntime(runtimeMode) {
+export async function fetchRunsForRuntime(runtimeMode, options = {}) {
   if (runtimeMode === "backend") {
-    return fetchBackendRuns();
+    return fetchBackendRuns(options.baseUrl);
   }
 
   return [];
 }
 
-export async function fetchRunDetailForRuntime(runtimeMode, runId) {
+export async function fetchRunDetailForRuntime(runtimeMode, runId, options = {}) {
   if (runtimeMode === "backend") {
-    return fetchBackendRunDetail(runId);
+    return fetchBackendRunDetail(runId, options.baseUrl);
   }
 
   return null;
 }
 
-export async function fetchRuntimeHealth(runtimeMode) {
+export async function fetchRuntimeHealth(runtimeMode, options = {}) {
   if (runtimeMode === "backend") {
-    return fetchBackendHealth();
+    return fetchBackendHealth(options.baseUrl);
   }
 
   return {
@@ -48,9 +48,9 @@ export async function fetchRuntimeHealth(runtimeMode) {
   };
 }
 
-export async function probeBackendRuntime() {
+export async function probeBackendRuntime(baseUrl = "") {
   try {
-    return await fetchBackendHealth();
+    return await fetchBackendHealth(baseUrl);
   } catch {
     return null;
   }

@@ -6,6 +6,7 @@ import { getPersistenceHealth, getRunDetail, listRunSummaries, saveRunRecord } f
 import { validateRunPayload } from "./validators.js";
 
 const PORT = Number(process.env.PORT || 8787);
+const HOST = process.env.HOST || "127.0.0.1";
 
 function collectJson(request) {
   return new Promise((resolve, reject) => {
@@ -176,6 +177,6 @@ const server = http.createServer(async (request, response) => {
   sendApiError(response, new ApiError(404, "not_found", "Not found."));
 });
 
-server.listen(PORT, "127.0.0.1", () => {
-  console.log(`Nexus backend listening on http://127.0.0.1:${PORT}`);
+server.listen(PORT, HOST, () => {
+  console.log(`Nexus backend listening on http://${HOST}:${PORT}`);
 });

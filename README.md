@@ -129,3 +129,13 @@ external model provider.
   endpoint on `http://127.0.0.1:11434/v1`.
 - Configure the local AI engine with `OLLAMA_MODEL` and optionally
   `OLLAMA_BASE_URL` before starting `npm run backend`.
+
+## Hosted backend split
+
+- The static frontend can now target either the same-origin `/api` adapter or a
+  separately hosted backend URL entered in the UI.
+- Backend mode stays optional; the public Pages site remains useful in local
+  simulation mode even when no backend is connected.
+- For a real deployment split, host the frontend statically and run the Node
+  backend separately with `HOST`, `PORT`, and optional Ollama environment
+  variables from `backend/.env.example`.

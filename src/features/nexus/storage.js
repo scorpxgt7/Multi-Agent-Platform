@@ -3,6 +3,7 @@ const STORAGE_KEYS = {
   selectedEngine: "nexus.selectedEngine",
   sessionHistory: "nexus.sessionHistory",
   approvalGate: "nexus.approvalGate",
+  backendBaseUrl: "nexus.backendBaseUrl",
 };
 
 function readJson(key, fallback) {
@@ -52,4 +53,12 @@ export function loadApprovalGate() {
 
 export function saveApprovalGate(enabled) {
   writeJson(STORAGE_KEYS.approvalGate, Boolean(enabled));
+}
+
+export function loadBackendBaseUrl() {
+  return readJson(STORAGE_KEYS.backendBaseUrl, "");
+}
+
+export function saveBackendBaseUrl(value) {
+  writeJson(STORAGE_KEYS.backendBaseUrl, value);
 }
