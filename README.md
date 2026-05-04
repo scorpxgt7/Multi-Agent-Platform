@@ -100,6 +100,13 @@ external model provider.
   count, and failure state so operators can inspect runs without opening raw
   logs first.
 
+## Rerun and comparison controls
+
+- Operators can reopen saved sessions and rerun the current task context from
+  the active workspace state.
+- The sidebar now compares the active run against another saved run to show
+  changes in runtime, engine, duration, artifact count, and output footprint.
+
 ## Backend run inspection
 
 - Backend runs now persist richer artifacts, including per-agent outputs.

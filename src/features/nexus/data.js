@@ -63,15 +63,43 @@ export const EMPTY_STATUSES = {
 
 export const TASK_PRESETS = [
   {
+    id: "discovery",
     label: "Research Brief",
+    category: "Discovery",
+    summary: "Frame a new opportunity, collect the strongest signals, and convert them into a focused next-step brief.",
+    outcome: "evidence-backed opportunity brief",
     task: "Research a new market opportunity, summarize the strongest signals, and propose the next actions.",
   },
   {
+    id: "operations",
     label: "Operations Workflow",
+    category: "Operations",
+    summary: "Map a repeatable workflow for intake, validation, execution, review, and delivery across a small team.",
+    outcome: "repeatable operating workflow",
     task: "Design a repeatable workflow for intake, validation, execution, quality review, and delivery.",
   },
   {
+    id: "product",
     label: "Product Planning",
+    category: "Product",
+    summary: "Break an initiative into requirements, priorities, risks, and execution order so delivery can start cleanly.",
+    outcome: "prioritized product roadmap",
     task: "Break down a product initiative into user needs, requirements, implementation steps, risks, and rollout priorities.",
+  },
+  {
+    id: "content",
+    label: "Content Operations",
+    category: "Content",
+    summary: "Coordinate research, planning, drafting, and review into a publishable content workflow.",
+    outcome: "publish-ready content package",
+    task: "Plan a content operations workflow that covers topic research, outline creation, drafting, review, and final publishing handoff.",
+  },
+  {
+    id: "qa-review",
+    label: "QA Review",
+    category: "Quality",
+    summary: "Inspect an existing workflow or deliverable, identify gaps, and define concrete corrective actions.",
+    outcome: "risk-ranked QA review",
+    task: "Run a quality review on an existing process, identify the highest-risk gaps, and recommend targeted fixes with owner-ready actions.",
   },
 ];

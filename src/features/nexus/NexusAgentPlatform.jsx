@@ -90,6 +90,34 @@ function AgentEditor({ agent, color, onSave, onCancel }) {
   );
 }
 
+function summarizeOutputLength(value) {
+  return typeof value === "string" ? value.trim().length : 0;
+}
+
+function buildRunComparison(primary, secondary) {
+  if (!primary || !secondary) {
+    return null;
+  }
+
+  return {
+    statusChanged: primary.status !== secondary.status,
+    runtimeChanged: primary.runtimeMode !== secondary.runtimeMode,
+    engineChanged: (primary.engineLabel || primary.engine) !== (secondary.engineLabel || secondary.engine),
+    durationDeltaMs:
+      typeof primary.durationMs === "number" && typeof secondary.durationMs === "number"
+        ? primary.durationMs - secondary.durationMs
+        : null,
+    artifactDelta:
+      typeof primary.artifactCount === "number" && typeof secondary.artifactCount === "number"
+        ? primary.artifactCount - secondary.artifactCount
+        : null,
+    outputLengthDelta:
+      typeof primary.finalOutput === "string" && typeof secondary.finalOutput === "string"
+        ? summarizeOutputLength(primary.finalOutput) - summarizeOutputLength(secondary.finalOutput)
+        : null,
+  };
+}
+
 export default function NexusAgentPlatform() {
   const [selectedPresetId, setSelectedPresetId] = useState(TASK_PRESETS[0].id);
   const [agents, setAgents] = useState(DEFAULT_AGENTS);
@@ -109,6 +137,7 @@ export default function NexusAgentPlatform() {
   const [backendRuns, setBackendRuns] = useState([]);
   const [selectedRunArtifacts, setSelectedRunArtifacts] = useState([]);
   const [selectedRunMeta, setSelectedRunMeta] = useState(null);
+  const [selectedComparisonRunId, setSelectedComparisonRunId] = useState("");
   const [showConfig, setShowConfig] = useState(false);
   const [editAgent, setEditAgent] = useState(null);
   const logRef = useRef(null);
@@ -180,6 +209,10 @@ export default function NexusAgentPlatform() {
       setRuntimeMode("local");
     }
   }, [runtimeMode, backendHealth]);
+
+  useEffect(() => {
+    setSelectedComparisonRunId("");
+  }, [runtimeMode, selectedRunMeta?.id]);
 
   useEffect(() => {
     if (!runtimeHealth?.engines?.length) {
@@ -346,10 +379,29 @@ export default function NexusAgentPlatform() {
     : RUNTIME_OPTIONS.filter((option) => option.value !== "backend");
   const availableBackendEngines = (runtimeHealth?.engines || []).filter((engine) => engine.available !== false);
   const selectedPreset = TASK_PRESETS.find((preset) => preset.id === selectedPresetId) || TASK_PRESETS[0];
+  const comparisonOptions = visibleSessions.filter((session) => String(session.id) !== String(selectedRunMeta?.id));
+  const comparisonTarget = comparisonOptions.find((session) => String(session.id) === String(selectedComparisonRunId))
+    || comparisonOptions[0]
+    || null;
+  const runComparison = selectedRunMeta && comparisonTarget
+    ? buildRunComparison(
+      {
+        ...selectedRunMeta,
+        finalOutput,
+      },
+      comparisonTarget,
+    )
+    : null;
   const openSavedSession = async (session) => {
     setTask(session.task);
     setFinalOutput(session.finalOutput);
     setActiveTab("output");
+    if (session.engine) {
+      setSelectedEngine(session.engine);
+    }
+    if (session.runtimeMode) {
+      setRuntimeMode(session.runtimeMode === "backend" && backendHealth ? "backend" : "local");
+    }
     setSelectedRunMeta({
       id: session.id,
       runtimeMode: session.runtimeMode,
@@ -363,7 +415,7 @@ export default function NexusAgentPlatform() {
       errorMessage: session.errorMessage || null,
     });
 
-    if (runtimeMode !== "backend") {
+    if (session.runtimeMode !== "backend") {
       setSelectedRunArtifacts([]);
       return;
     }
@@ -572,19 +624,58 @@ export default function NexusAgentPlatform() {
             <div style={{ padding: "10px", background: "#0c1018", border: "1px solid #141c28", borderRadius: 4 }}>
               <div style={{ fontFamily: "'Share Tech Mono',monospace", fontSize: 8, color: "#2e3d4d", letterSpacing: "0.15em", marginBottom: 6, textTransform: "uppercase" }}>Run Metadata</div>
               {selectedRunMeta ? (
-                <div style={{ display: "grid", gap: 4, fontFamily: "'Share Tech Mono',monospace", fontSize: 8, color: "#8fa0b0" }}>
-                  <div>Status: {selectedRunMeta.status || "unknown"}</div>
-                  <div>Runtime: {selectedRunMeta.runtimeMode || "unknown"}</div>
-                  <div>Engine: {selectedRunMeta.engineLabel || selectedRunMeta.engine || "n/a"}</div>
-                  <div>Artifacts: {selectedRunMeta.artifactCount ?? "n/a"}</div>
-                  <div>Duration: {selectedRunMeta.durationMs != null ? `${selectedRunMeta.durationMs} ms` : "n/a"}</div>
-                  <div>Started: {selectedRunMeta.startedAt || "n/a"}</div>
-                  <div>Completed: {selectedRunMeta.completedAt || "n/a"}</div>
-                  {selectedRunMeta.errorMessage && <div style={{ color: "#ef4444" }}>Error: {selectedRunMeta.errorMessage}</div>}
-                </div>
+                <>
+                  <div style={{ display: "grid", gap: 4, fontFamily: "'Share Tech Mono',monospace", fontSize: 8, color: "#8fa0b0" }}>
+                    <div>Status: {selectedRunMeta.status || "unknown"}</div>
+                    <div>Runtime: {selectedRunMeta.runtimeMode || "unknown"}</div>
+                    <div>Engine: {selectedRunMeta.engineLabel || selectedRunMeta.engine || "n/a"}</div>
+                    <div>Artifacts: {selectedRunMeta.artifactCount ?? "n/a"}</div>
+                    <div>Duration: {selectedRunMeta.durationMs != null ? `${selectedRunMeta.durationMs} ms` : "n/a"}</div>
+                    <div>Started: {selectedRunMeta.startedAt || "n/a"}</div>
+                    <div>Completed: {selectedRunMeta.completedAt || "n/a"}</div>
+                    {selectedRunMeta.errorMessage && <div style={{ color: "#ef4444" }}>Error: {selectedRunMeta.errorMessage}</div>}
+                  </div>
+                  <button onClick={() => { void runPipeline(); }} disabled={running || !task.trim()} style={{ marginTop: 8, width: "100%", padding: "8px 0", background: "#111522", border: "1px solid #1a2530", borderRadius: 4, color: "#d5dde6", cursor: "pointer", fontFamily: "Rajdhani,sans-serif", fontWeight: 700, fontSize: 11, letterSpacing: "0.1em", textTransform: "uppercase" }}>
+                    Rerun Current Context
+                  </button>
+                </>
               ) : (
                 <div style={{ fontFamily: "'Share Tech Mono',monospace", fontSize: 9, color: "#364556", lineHeight: 1.5 }}>
                   Run metadata appears here after a local run or when you open a saved session.
+                </div>
+              )}
+            </div>
+            <div style={{ padding: "10px", background: "#0c1018", border: "1px solid #141c28", borderRadius: 4 }}>
+              <div style={{ fontFamily: "'Share Tech Mono',monospace", fontSize: 8, color: "#2e3d4d", letterSpacing: "0.15em", marginBottom: 6, textTransform: "uppercase" }}>Run Comparison</div>
+              {selectedRunMeta && comparisonTarget && runComparison ? (
+                <>
+                  {comparisonOptions.length > 1 && (
+                    <select
+                      value={comparisonTarget?.id ?? ""}
+                      onChange={(event) => setSelectedComparisonRunId(event.target.value)}
+                      disabled={running}
+                      style={{ width: "100%", marginBottom: 8, background: "#0b0e15", border: "1px solid #1a2530", borderRadius: 4, color: "#8fa0b0", padding: "8px 10px", fontFamily: "'Share Tech Mono',monospace", fontSize: 9 }}
+                    >
+                      {comparisonOptions.map((session) => (
+                        <option key={session.id} value={session.id}>
+                          {(session.time || "saved run")} - {(session.engineLabel || session.engine || session.runtimeMode || "run")}
+                        </option>
+                      ))}
+                    </select>
+                  )}
+                  <div style={{ display: "grid", gap: 4, fontFamily: "'Share Tech Mono',monospace", fontSize: 8, color: "#8fa0b0" }}>
+                    <div>Against: {comparisonTarget.time || "saved run"} - {(comparisonTarget.engineLabel || comparisonTarget.engine || comparisonTarget.runtimeMode || "run")}</div>
+                    <div>Status changed: {runComparison.statusChanged ? "yes" : "no"}</div>
+                    <div>Runtime changed: {runComparison.runtimeChanged ? "yes" : "no"}</div>
+                    <div>Engine changed: {runComparison.engineChanged ? "yes" : "no"}</div>
+                    <div>Duration delta: {runComparison.durationDeltaMs != null ? `${runComparison.durationDeltaMs} ms` : "n/a"}</div>
+                    <div>Artifact delta: {runComparison.artifactDelta != null ? runComparison.artifactDelta : "n/a"}</div>
+                    <div>Output length delta: {runComparison.outputLengthDelta != null ? runComparison.outputLengthDelta : "n/a"}</div>
+                  </div>
+                </>
+              ) : (
+                <div style={{ fontFamily: "'Share Tech Mono',monospace", fontSize: 9, color: "#364556", lineHeight: 1.5 }}>
+                  Open or complete at least two runs to compare runtime, engine, duration, and output footprint.
                 </div>
               )}
             </div>
