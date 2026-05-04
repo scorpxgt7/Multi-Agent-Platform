@@ -1,11 +1,9 @@
 import http from "node:http";
-import fs from "node:fs/promises";
-import path from "node:path";
+import crypto from "node:crypto";
 import { getDefaultEngineId, getEngine, listEngines } from "./engines/index.js";
+import { getPersistenceHealth, getRunDetail, listRunSummaries, saveRunRecord } from "./storage.js";
 
 const PORT = Number(process.env.PORT || 8787);
-const DATA_DIR = path.resolve("backend/data");
-const RUNS_PATH = path.join(DATA_DIR, "nexus-runs.json");
 
 function sendJson(response, statusCode, payload) {
   response.writeHead(statusCode, {
@@ -34,36 +32,6 @@ function collectJson(request) {
   });
 }
 
-async function loadRuns() {
-  try {
-    const raw = await fs.readFile(RUNS_PATH, "utf8");
-    const payload = JSON.parse(raw);
-    return Array.isArray(payload) ? payload : [];
-  } catch (error) {
-    if (error.code === "ENOENT") {
-      return [];
-    }
-    throw error;
-  }
-}
-
-async function saveRuns(runs) {
-  await fs.mkdir(DATA_DIR, { recursive: true });
-  await fs.writeFile(RUNS_PATH, JSON.stringify(runs.slice(0, 20), null, 2));
-}
-
-function buildRunSummary(run) {
-  return {
-    id: run.id,
-    runtimeMode: run.runtimeMode,
-    engine: run.engine,
-    task: run.task,
-    time: run.time,
-    finalOutput: run.finalOutput,
-    artifactCount: Array.isArray(run.artifacts) ? run.artifacts.length : 0,
-  };
-}
-
 const server = http.createServer(async (request, response) => {
   if (!request.url) {
     sendJson(response, 400, { error: "Missing request URL." });
@@ -77,20 +45,22 @@ const server = http.createServer(async (request, response) => {
 
   if (request.method === "GET" && request.url === "/api/health") {
     const engines = await listEngines();
+    const persistence = await getPersistenceHealth();
     sendJson(response, 200, {
       ok: true,
       service: "nexus-backend",
       port: PORT,
       defaultEngine: getDefaultEngineId(),
       engines,
+      persistence,
     });
     return;
   }
 
   if (request.method === "GET" && request.url === "/api/nexus/runs") {
     try {
-      const runs = await loadRuns();
-      sendJson(response, 200, { runs: runs.map(buildRunSummary) });
+      const runs = await listRunSummaries();
+      sendJson(response, 200, { runs });
       return;
     } catch (error) {
       sendJson(response, 500, { error: error.message || "Failed to load runs." });
@@ -101,8 +71,7 @@ const server = http.createServer(async (request, response) => {
   if (request.method === "GET" && request.url.startsWith("/api/nexus/runs/")) {
     try {
       const runId = request.url.split("/").pop();
-      const runs = await loadRuns();
-      const run = runs.find((entry) => String(entry.id) === String(runId));
+      const run = await getRunDetail(runId);
 
       if (!run) {
         sendJson(response, 404, { error: "Run not found." });
@@ -118,11 +87,15 @@ const server = http.createServer(async (request, response) => {
   }
 
   if (request.method === "POST" && request.url === "/api/nexus/run") {
+    let task = "";
+    let requestedEngineId = getDefaultEngineId();
+    let startedAt = new Date().toISOString();
+
     try {
       const payload = await collectJson(request);
-      const task = typeof payload.task === "string" ? payload.task.trim() : "";
+      task = typeof payload.task === "string" ? payload.task.trim() : "";
       const agents = Array.isArray(payload.agents) ? payload.agents : [];
-      const requestedEngineId = typeof payload.engine === "string" && payload.engine.trim()
+      requestedEngineId = typeof payload.engine === "string" && payload.engine.trim()
         ? payload.engine.trim()
         : getDefaultEngineId();
       const engine = getEngine(requestedEngineId);
@@ -137,8 +110,8 @@ const server = http.createServer(async (request, response) => {
         return;
       }
 
+      startedAt = new Date().toISOString();
       const result = await engine.run({ task, agents });
-      const runs = await loadRuns();
       const artifacts = agents.map((agent) => ({
         agentId: agent.id,
         name: agent.name,
@@ -147,12 +120,18 @@ const server = http.createServer(async (request, response) => {
         skills: agent.advancedSkills || [],
         output: result.collected?.[agent.name] || "",
       }));
+      const completedAt = new Date().toISOString();
       const runRecord = {
-        id: Date.now(),
+        id: crypto.randomUUID(),
         runtimeMode: "backend",
         engine: engine.id,
+        engineLabel: engine.label,
         task,
         time: new Date().toLocaleString("en-US"),
+        status: "completed",
+        startedAt,
+        completedAt,
+        durationMs: Math.max(0, new Date(completedAt).getTime() - new Date(startedAt).getTime()),
         finalOutput: result.finalOutput,
         entries: result.entries,
         statuses: result.statuses,
@@ -160,16 +139,42 @@ const server = http.createServer(async (request, response) => {
         supervisorBrief: result.supervisorBrief,
         synthesis: result.synthesis,
         artifacts,
+        errorMessage: null,
       };
-      runs.unshift(runRecord);
-      await saveRuns(runs);
+      await saveRunRecord(runRecord);
       sendJson(response, 200, {
         ...result,
+        id: runRecord.id,
         engine: engine.id,
         engineLabel: engine.label,
       });
       return;
     } catch (error) {
+      try {
+        const completedAt = new Date().toISOString();
+        await saveRunRecord({
+          id: crypto.randomUUID(),
+          runtimeMode: "backend",
+          engine: requestedEngineId,
+          engineLabel: null,
+          task,
+          time: new Date().toLocaleString("en-US"),
+          status: "failed",
+          startedAt,
+          completedAt,
+          durationMs: Math.max(0, new Date(completedAt).getTime() - new Date(startedAt).getTime()),
+          finalOutput: "",
+          entries: [],
+          statuses: [],
+          managerPlan: "",
+          supervisorBrief: "",
+          synthesis: "",
+          artifacts: [],
+          errorMessage: error.message || "Backend pipeline failed.",
+        });
+      } catch {
+        // Preserve the primary error response even if failure logging fails.
+      }
       sendJson(response, 500, { error: error.message || "Backend pipeline failed." });
       return;
     }

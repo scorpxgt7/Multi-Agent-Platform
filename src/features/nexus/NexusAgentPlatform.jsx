@@ -186,7 +186,8 @@ export default function NexusAgentPlatform() {
 
     const engineExists = runtimeHealth.engines.some((engine) => engine.id === selectedEngine && engine.available !== false);
     if (!engineExists) {
-      setSelectedEngine(runtimeHealth.defaultEngine);
+      const nextAvailableEngine = runtimeHealth.engines.find((engine) => engine.available !== false);
+      setSelectedEngine(nextAvailableEngine?.id || runtimeHealth.defaultEngine);
     }
   }, [runtimeHealth, selectedEngine]);
 

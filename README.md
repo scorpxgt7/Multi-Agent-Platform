@@ -74,10 +74,14 @@ external model provider.
 
 ## Phase 5 notes
 
-- The backend now persists completed runs to `backend/data/nexus-runs.json`.
+- The backend now prefers SQLite persistence through `backend/sqlite_bridge.py`
+  and stores data in `backend/data/nexus-runs.db`.
+- Legacy JSON run history is migrated into SQLite on first bridge use.
+- If the SQLite bridge is unavailable, the backend falls back to the existing
+  JSON store instead of failing the entire app.
 - `GET /api/nexus/runs` exposes saved backend runs for the frontend session list.
-- Backend mode now has both execution and persisted history, rather than relying
-  only on browser-local session storage.
+- Backend mode now has both execution and durable persisted history, rather than
+  relying only on browser-local session storage.
 
 ## Agent roles
 
