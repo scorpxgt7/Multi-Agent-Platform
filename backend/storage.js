@@ -1,5 +1,6 @@
 import path from "node:path";
 import { spawn } from "node:child_process";
+import { loadConfig } from "./config.js";
 import { getJsonPersistenceHealth, getRunDetailFromJson, listRunSummariesFromJson, saveRunRecordToJson } from "./jsonStorage.js";
 
 const PYTHON_BRIDGE_PATH = path.resolve("backend/sqlite_bridge.py");
@@ -44,46 +45,141 @@ function callPythonBridge(command, payload = null) {
   });
 }
 
-export async function getPersistenceHealth() {
+function getPersistenceMode() {
+  return loadConfig().persistenceMode;
+}
+
+async function trySqlite(command, payload = null) {
+  const response = await callPythonBridge(command, payload);
+  return {
+    mode: "sqlite",
+    payload: response,
+  };
+}
+
+function buildJsonHealth() {
+  return {
+    ...getJsonPersistenceHealth(),
+    configuredMode: getPersistenceMode(),
+  };
+}
+
+async function resolvePersistenceHealth() {
+  const mode = getPersistenceMode();
+
+  if (mode === "json") {
+    return buildJsonHealth();
+  }
+
   try {
-    const payload = await callPythonBridge("health");
+    const sqlite = await trySqlite("health");
     return {
       mode: "sqlite",
+      configuredMode: mode,
       available: true,
       degraded: false,
-      location: payload.dbPath,
-      migratedLegacyJson: payload.migratedLegacyJson || false,
+      location: sqlite.payload.dbPath,
+      migratedLegacyJson: sqlite.payload.migratedLegacyJson || false,
     };
   } catch (error) {
+    if (mode === "sqlite") {
+      return {
+        mode: "sqlite",
+        configuredMode: mode,
+        available: false,
+        degraded: false,
+        location: null,
+        error: error.message,
+      };
+    }
+
     return {
-      ...getJsonPersistenceHealth(),
+      ...buildJsonHealth(),
       error: error.message,
     };
   }
 }
 
+export async function getPersistenceHealth() {
+  return resolvePersistenceHealth();
+}
+
 export async function listRunSummaries() {
+  const mode = getPersistenceMode();
+
+  if (mode === "json") {
+    return listRunSummariesFromJson();
+  }
+
   try {
     const payload = await callPythonBridge("list_runs");
     return Array.isArray(payload.runs) ? payload.runs : [];
-  } catch {
+  } catch (error) {
+    if (mode === "sqlite") {
+      throw error;
+    }
     return listRunSummariesFromJson();
   }
 }
 
 export async function getRunDetail(runId) {
+  const mode = getPersistenceMode();
+
+  if (mode === "json") {
+    return getRunDetailFromJson(runId);
+  }
+
   try {
     const payload = await callPythonBridge("get_run", { id: runId });
     return payload.run || null;
-  } catch {
+  } catch (error) {
+    if (mode === "sqlite") {
+      throw error;
+    }
     return getRunDetailFromJson(runId);
   }
 }
 
 export async function saveRunRecord(runRecord) {
+  const mode = getPersistenceMode();
+
+  if (mode === "json") {
+    await saveRunRecordToJson(runRecord);
+    return;
+  }
+
   try {
     await callPythonBridge("save_run", { run: runRecord });
-  } catch {
+  } catch (error) {
+    if (mode === "sqlite") {
+      throw error;
+    }
     await saveRunRecordToJson(runRecord);
   }
+}
+
+export async function validatePersistenceReadiness() {
+  const health = await resolvePersistenceHealth();
+  const mode = getPersistenceMode();
+  const errors = [];
+  const warnings = [];
+
+  if (mode === "sqlite" && !health.available) {
+    errors.push(`SQLite persistence is required but unavailable: ${health.error || "unknown error"}`);
+  }
+
+  if (mode === "auto" && health.mode === "json") {
+    warnings.push("Persistence is running in JSON fallback mode under auto configuration.");
+  }
+
+  if (mode === "json") {
+    warnings.push("Persistence mode is explicitly set to JSON.");
+  }
+
+  return {
+    ok: errors.length === 0,
+    errors,
+    warnings,
+    health,
+  };
 }

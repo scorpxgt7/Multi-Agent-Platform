@@ -146,6 +146,9 @@ external model provider.
 - Set `CORS_ALLOWED_ORIGINS` to an explicit allowlist before public deployment.
 - Set `NEXUS_API_KEY` before public deployment if backend operations should be
   protected from anonymous access.
+- Set `NEXUS_PERSISTENCE_MODE` to `auto`, `sqlite`, or `json` depending on the
+  deployment tier. Use `sqlite` for strict production persistence, `json` only
+  for controlled fallback use, and `auto` for local/development flexibility.
 - `GET /api/health` now reports deployment diagnostics such as host, port,
   persistence mode, uptime, public app URL, and CORS mode so the frontend can
   verify a remote backend configuration.

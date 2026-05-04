@@ -60,6 +60,11 @@ function normalizeApiKey(value) {
   return typeof value === "string" && value.trim() ? value.trim() : "";
 }
 
+function normalizePersistenceMode(value) {
+  const normalized = typeof value === "string" ? value.trim().toLowerCase() : "";
+  return ["auto", "sqlite", "json"].includes(normalized) ? normalized : "auto";
+}
+
 function isValidUrl(value) {
   try {
     const parsed = new URL(value);
@@ -81,6 +86,7 @@ export function loadConfig() {
   const maintenanceIntervalMinutes = normalizePositiveInteger(process.env.MAINTENANCE_INTERVAL_MINUTES, 1440);
   const maintenanceDailyUtc = normalizeDailyUtc(process.env.MAINTENANCE_DAILY_UTC);
   const apiKey = normalizeApiKey(process.env.NEXUS_API_KEY);
+  const persistenceMode = normalizePersistenceMode(process.env.NEXUS_PERSISTENCE_MODE);
 
   return {
     host,
@@ -94,6 +100,7 @@ export function loadConfig() {
     maintenanceDailyUtc,
     apiKey,
     authEnabled: Boolean(apiKey),
+    persistenceMode,
   };
 }
 
@@ -129,6 +136,14 @@ export function getConfigAdvisories(config) {
       level: "warn",
       key: "auth_disabled_public",
       message: "Backend API auth is disabled while a public app URL is configured.",
+    });
+  }
+
+  if (config.persistenceMode === "json" && config.publicAppUrl) {
+    advisories.push({
+      level: "warn",
+      key: "json_persistence_public",
+      message: "JSON persistence mode is selected for a deployment with a public app URL.",
     });
   }
 
@@ -186,6 +201,10 @@ export function validateConfig(config) {
 
   if (config.allowedOrigins.includes("*") && config.publicAppUrl) {
     warnings.push("CORS is configured as wildcard while PUBLIC_APP_URL is configured.");
+  }
+
+  if (!["auto", "sqlite", "json"].includes(config.persistenceMode)) {
+    errors.push("NEXUS_PERSISTENCE_MODE must be one of auto, sqlite, or json.");
   }
 
   return {

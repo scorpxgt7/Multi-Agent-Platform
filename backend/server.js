@@ -5,7 +5,7 @@ import { getDiagnosticSummary, listDiagnosticEvents, recordDiagnosticEvent } fro
 import { ApiError, sendApiError, sendApiSuccess } from "./errors.js";
 import { getDefaultEngineId, getEngine, hasEngine, listEngines } from "./engines/index.js";
 import { getMaintenanceReviews, getMaintenanceStatus, initializeMaintenanceScheduler, runMaintenanceReview } from "./maintenanceRunner.js";
-import { getPersistenceHealth, getRunDetail, listRunSummaries, saveRunRecord } from "./storage.js";
+import { getPersistenceHealth, getRunDetail, listRunSummaries, saveRunRecord, validatePersistenceReadiness } from "./storage.js";
 import { validateRunPayload } from "./validators.js";
 
 const CONFIG = loadConfig();
@@ -13,11 +13,19 @@ const SERVER_STARTED_AT = Date.now();
 let lastPersistenceErrorMessage = "";
 const VALIDATE_ONLY = process.argv.includes("--validate");
 const STARTUP_VALIDATION = validateConfig(CONFIG);
+const PERSISTENCE_VALIDATION = await validatePersistenceReadiness();
 
 if (!hasEngine(CONFIG.defaultEngine)) {
   STARTUP_VALIDATION.ok = false;
   STARTUP_VALIDATION.errors.push(`NEXUS_ENGINE "${CONFIG.defaultEngine}" is not registered.`);
 }
+
+if (!PERSISTENCE_VALIDATION.ok) {
+  STARTUP_VALIDATION.ok = false;
+  STARTUP_VALIDATION.errors.push(...PERSISTENCE_VALIDATION.errors);
+}
+
+STARTUP_VALIDATION.warnings.push(...PERSISTENCE_VALIDATION.warnings);
 
 if (!STARTUP_VALIDATION.ok) {
   console.error("Backend startup validation failed:");
@@ -39,7 +47,9 @@ if (VALIDATE_ONLY) {
       publicAppUrl: CONFIG.publicAppUrl || null,
       authEnabled: CONFIG.authEnabled,
       defaultEngine: CONFIG.defaultEngine,
+      persistenceMode: CONFIG.persistenceMode,
     },
+    persistence: PERSISTENCE_VALIDATION.health,
     warnings: STARTUP_VALIDATION.warnings,
   }));
   process.exit(0);
@@ -157,6 +167,7 @@ const server = http.createServer(async (request, response) => {
             ok: STARTUP_VALIDATION.ok,
             warnings: STARTUP_VALIDATION.warnings,
           },
+          persistenceMode: CONFIG.persistenceMode,
         },
         diagnostics,
       }, corsHeaders);
