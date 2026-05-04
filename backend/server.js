@@ -1,12 +1,13 @@
 import http from "node:http";
 import crypto from "node:crypto";
+import { createCorsHeaders, isOriginAllowed, loadConfig } from "./config.js";
 import { ApiError, sendApiError, sendApiSuccess } from "./errors.js";
 import { getDefaultEngineId, getEngine, listEngines } from "./engines/index.js";
 import { getPersistenceHealth, getRunDetail, listRunSummaries, saveRunRecord } from "./storage.js";
 import { validateRunPayload } from "./validators.js";
 
-const PORT = Number(process.env.PORT || 8787);
-const HOST = process.env.HOST || "127.0.0.1";
+const CONFIG = loadConfig();
+const SERVER_STARTED_AT = Date.now();
 
 function collectJson(request) {
   return new Promise((resolve, reject) => {
@@ -26,17 +27,21 @@ function collectJson(request) {
 }
 
 const server = http.createServer(async (request, response) => {
+  const requestOrigin = request.headers.origin;
+  const corsHeaders = createCorsHeaders(requestOrigin, CONFIG.allowedOrigins);
+
   if (!request.url) {
-    sendApiError(response, new ApiError(400, "missing_url", "Missing request URL."));
+    sendApiError(response, new ApiError(400, "missing_url", "Missing request URL."), corsHeaders);
+    return;
+  }
+
+  if (!isOriginAllowed(requestOrigin, CONFIG.allowedOrigins)) {
+    sendApiError(response, new ApiError(403, "origin_not_allowed", "Origin is not allowed to access this backend."), corsHeaders);
     return;
   }
 
   if (request.method === "OPTIONS") {
-    response.writeHead(204, {
-      "Access-Control-Allow-Origin": "*",
-      "Access-Control-Allow-Headers": "Content-Type",
-      "Access-Control-Allow-Methods": "GET,POST,OPTIONS",
-    });
+    response.writeHead(204, corsHeaders);
     response.end();
     return;
   }
@@ -47,14 +52,23 @@ const server = http.createServer(async (request, response) => {
       const persistence = await getPersistenceHealth();
       sendApiSuccess(response, 200, {
         service: "nexus-backend",
-        port: PORT,
+        host: CONFIG.host,
+        port: CONFIG.port,
         defaultEngine: getDefaultEngineId(),
         engines,
         persistence,
-      });
+        uptimeMs: Date.now() - SERVER_STARTED_AT,
+        timestamp: new Date().toISOString(),
+        deployment: {
+          nodeEnv: CONFIG.nodeEnv,
+          publicAppUrl: CONFIG.publicAppUrl || null,
+          allowedOrigins: CONFIG.allowedOrigins,
+          corsMode: CONFIG.allowedOrigins.includes("*") ? "wildcard" : "allowlist",
+        },
+      }, corsHeaders);
       return;
     } catch (error) {
-      sendApiError(response, error);
+      sendApiError(response, error, corsHeaders);
       return;
     }
   }
@@ -62,10 +76,10 @@ const server = http.createServer(async (request, response) => {
   if (request.method === "GET" && request.url === "/api/nexus/runs") {
     try {
       const runs = await listRunSummaries();
-      sendApiSuccess(response, 200, { runs });
+      sendApiSuccess(response, 200, { runs }, corsHeaders);
       return;
     } catch (error) {
-      sendApiError(response, error);
+      sendApiError(response, error, corsHeaders);
       return;
     }
   }
@@ -76,14 +90,14 @@ const server = http.createServer(async (request, response) => {
       const run = await getRunDetail(runId);
 
       if (!run) {
-        sendApiError(response, new ApiError(404, "run_not_found", "Run not found."));
+        sendApiError(response, new ApiError(404, "run_not_found", "Run not found."), corsHeaders);
         return;
       }
 
-      sendApiSuccess(response, 200, { run });
+      sendApiSuccess(response, 200, { run }, corsHeaders);
       return;
     } catch (error) {
-      sendApiError(response, error);
+      sendApiError(response, error, corsHeaders);
       return;
     }
   }
@@ -139,7 +153,7 @@ const server = http.createServer(async (request, response) => {
         id: runRecord.id,
         engine: engine.id,
         engineLabel: engine.label,
-      });
+      }, corsHeaders);
       return;
     } catch (error) {
       if (!(error instanceof ApiError)) {
@@ -169,14 +183,14 @@ const server = http.createServer(async (request, response) => {
           // Preserve the primary error response even if failure logging fails.
         }
       }
-      sendApiError(response, error);
+      sendApiError(response, error, corsHeaders);
       return;
     }
   }
 
-  sendApiError(response, new ApiError(404, "not_found", "Not found."));
+  sendApiError(response, new ApiError(404, "not_found", "Not found."), corsHeaders);
 });
 
-server.listen(PORT, HOST, () => {
-  console.log(`Nexus backend listening on http://${HOST}:${PORT}`);
+server.listen(CONFIG.port, CONFIG.host, () => {
+  console.log(`Nexus backend listening on http://${CONFIG.host}:${CONFIG.port}`);
 });

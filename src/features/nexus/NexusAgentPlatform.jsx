@@ -602,8 +602,13 @@ export default function NexusAgentPlatform() {
                   <>
                     <div>Service: {runtimeHealth.service}</div>
                     <div>Endpoint: {backendBaseUrl.trim() || "same-origin /api"}</div>
+                    <div>Host: {runtimeHealth.host || "n/a"}:{runtimeHealth.port || "n/a"}</div>
                     <div>Default engine: {runtimeHealth.defaultEngine}</div>
                     <div>Selected engine: {selectedEngine}</div>
+                    <div>Persistence: {runtimeHealth.persistence?.mode || "unknown"}</div>
+                    <div>CORS mode: {runtimeHealth.deployment?.corsMode || "unknown"}</div>
+                    <div>Allowed origins: {Array.isArray(runtimeHealth.deployment?.allowedOrigins) ? runtimeHealth.deployment.allowedOrigins.join(", ") : "n/a"}</div>
+                    <div>Public app URL: {runtimeHealth.deployment?.publicAppUrl || "n/a"}</div>
                     <div>Available engines: {availableBackendEngines.length ? availableBackendEngines.map((engine) => `${engine.label} (${engine.id})`).join(", ") : "None detected"}</div>
                   </>
                 ) : backendHealth ? (

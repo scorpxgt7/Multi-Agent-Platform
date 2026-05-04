@@ -139,3 +139,7 @@ external model provider.
 - For a real deployment split, host the frontend statically and run the Node
   backend separately with `HOST`, `PORT`, and optional Ollama environment
   variables from `backend/.env.example`.
+- Set `CORS_ALLOWED_ORIGINS` to an explicit allowlist before public deployment.
+- `GET /api/health` now reports deployment diagnostics such as host, port,
+  persistence mode, uptime, public app URL, and CORS mode so the frontend can
+  verify a remote backend configuration.

@@ -1,6 +1,7 @@
 import { localEngine } from "./localEngine.js";
 import { ollamaEngine } from "./ollamaEngine.js";
 import { rulesEngine } from "./rulesEngine.js";
+import { loadConfig } from "../config.js";
 
 const ENGINE_REGISTRY = {
   [localEngine.id]: localEngine,
@@ -23,5 +24,5 @@ export function getEngine(engineId) {
 }
 
 export function getDefaultEngineId() {
-  return process.env.NEXUS_ENGINE || localEngine.id;
+  return loadConfig().defaultEngine || localEngine.id;
 }

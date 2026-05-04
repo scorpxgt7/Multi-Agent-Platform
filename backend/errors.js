@@ -8,17 +8,18 @@ export class ApiError extends Error {
   }
 }
 
-export function sendApiSuccess(response, statusCode, payload) {
+export function sendApiSuccess(response, statusCode, payload, extraHeaders = {}) {
   response.writeHead(statusCode, {
     "Content-Type": "application/json; charset=utf-8",
     "Access-Control-Allow-Origin": "*",
     "Access-Control-Allow-Headers": "Content-Type",
     "Access-Control-Allow-Methods": "GET,POST,OPTIONS",
+    ...extraHeaders,
   });
   response.end(JSON.stringify({ ok: true, ...payload }));
 }
 
-export function sendApiError(response, error) {
+export function sendApiError(response, error, extraHeaders = {}) {
   const statusCode = error instanceof ApiError ? error.status : 500;
   const code = error instanceof ApiError ? error.code : "internal_error";
   const message = error instanceof ApiError ? error.message : (error?.message || "Internal server error.");
@@ -29,6 +30,7 @@ export function sendApiError(response, error) {
     "Access-Control-Allow-Origin": "*",
     "Access-Control-Allow-Headers": "Content-Type",
     "Access-Control-Allow-Methods": "GET,POST,OPTIONS",
+    ...extraHeaders,
   });
   response.end(JSON.stringify({
     ok: false,
