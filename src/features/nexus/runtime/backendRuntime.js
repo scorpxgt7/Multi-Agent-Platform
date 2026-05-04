@@ -114,3 +114,35 @@ export async function fetchBackendDiagnosticsSummary(baseUrl = "") {
 
   return payload.diagnostics;
 }
+
+export async function fetchBackendMaintenanceStatus(baseUrl = "") {
+  const response = await fetch(createApiUrl("/maintenance/status", baseUrl));
+
+  if (!response.ok) {
+    throw new Error(await readApiError(response, `Backend maintenance status request failed with status ${response.status}`));
+  }
+
+  const payload = await response.json();
+  if (!payload.ok || !payload.maintenance) {
+    throw new Error("Backend maintenance status response is invalid.");
+  }
+
+  return payload.maintenance;
+}
+
+export async function runBackendMaintenanceReview(baseUrl = "") {
+  const response = await fetch(createApiUrl("/maintenance/run", baseUrl), {
+    method: "POST",
+  });
+
+  if (!response.ok) {
+    throw new Error(await readApiError(response, `Backend maintenance review failed with status ${response.status}`));
+  }
+
+  const payload = await response.json();
+  if (!payload.ok || !payload.review) {
+    throw new Error("Backend maintenance review response is invalid.");
+  }
+
+  return payload.review;
+}

@@ -150,5 +150,11 @@ external model provider.
   failed runs, and persistence degradation.
 - `GET /api/diagnostics/summary` exposes a lightweight backend health history
   summary for operator-facing diagnostics panels.
+- The backend now also supports persisted maintenance reviews through:
+  - `GET /api/maintenance/status`
+  - `GET /api/maintenance/reviews`
+  - `POST /api/maintenance/run`
+- Optional auto-run scheduling is controlled by `MAINTENANCE_AUTORUN` together
+  with either `MAINTENANCE_DAILY_UTC` or `MAINTENANCE_INTERVAL_MINUTES`.
 - This is the groundwork for a future scheduled reviewer system, but no
-  autonomous fixer or scheduler is enabled yet.
+  autonomous fixer is enabled yet.

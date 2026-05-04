@@ -20,6 +20,42 @@ function normalizeAllowedOrigins(value) {
   return parsed.length ? parsed : ["*"];
 }
 
+function normalizeBoolean(value, fallback = false) {
+  if (typeof value !== "string") {
+    return fallback;
+  }
+
+  const normalized = value.trim().toLowerCase();
+  if (["1", "true", "yes", "on"].includes(normalized)) {
+    return true;
+  }
+  if (["0", "false", "no", "off"].includes(normalized)) {
+    return false;
+  }
+  return fallback;
+}
+
+function normalizePositiveInteger(value, fallback) {
+  const parsed = Number(value);
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+function normalizeDailyUtc(value) {
+  if (typeof value !== "string" || !/^\d{2}:\d{2}$/.test(value.trim())) {
+    return "";
+  }
+
+  const [hourText, minuteText] = value.trim().split(":");
+  const hour = Number(hourText);
+  const minute = Number(minuteText);
+
+  if (hour < 0 || hour > 23 || minute < 0 || minute > 59) {
+    return "";
+  }
+
+  return `${hourText}:${minuteText}`;
+}
+
 export function loadConfig() {
   const host = normalizeHost(process.env.HOST);
   const port = normalizePort(process.env.PORT);
@@ -28,6 +64,9 @@ export function loadConfig() {
   const defaultEngine = typeof process.env.NEXUS_ENGINE === "string" && process.env.NEXUS_ENGINE.trim()
     ? process.env.NEXUS_ENGINE.trim()
     : "local-simulation";
+  const maintenanceEnabled = normalizeBoolean(process.env.MAINTENANCE_AUTORUN, false);
+  const maintenanceIntervalMinutes = normalizePositiveInteger(process.env.MAINTENANCE_INTERVAL_MINUTES, 1440);
+  const maintenanceDailyUtc = normalizeDailyUtc(process.env.MAINTENANCE_DAILY_UTC);
 
   return {
     host,
@@ -36,6 +75,9 @@ export function loadConfig() {
     publicAppUrl,
     defaultEngine,
     nodeEnv: process.env.NODE_ENV || "development",
+    maintenanceEnabled,
+    maintenanceIntervalMinutes,
+    maintenanceDailyUtc,
   };
 }
 

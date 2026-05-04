@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { AGENT_COLORS, DEFAULT_AGENTS, EMPTY_STATUSES, STATUS_COLOR, TASK_PRESETS } from "./data.js";
-import { RUNTIME_OPTIONS, fetchDiagnosticsForRuntime, fetchRunDetailForRuntime, fetchRunsForRuntime, fetchRuntimeHealth, probeBackendRuntime, runPipelineWithRuntime } from "./runtime/client.js";
+import { RUNTIME_OPTIONS, fetchDiagnosticsForRuntime, fetchMaintenanceForRuntime, fetchRunDetailForRuntime, fetchRunsForRuntime, fetchRuntimeHealth, probeBackendRuntime, runMaintenanceForRuntime, runPipelineWithRuntime } from "./runtime/client.js";
 import { loadApprovalGate, loadBackendBaseUrl, loadRuntimeMode, loadSelectedEngine, loadSessionHistory, saveApprovalGate, saveBackendBaseUrl, saveRuntimeMode, saveSelectedEngine, saveSessionHistory } from "./storage.js";
 
 function AgentNode({ name, role, status, size = "sm", onClick }) {
@@ -135,6 +135,8 @@ export default function NexusAgentPlatform() {
   const [runtimeHealth, setRuntimeHealth] = useState(null);
   const [backendHealth, setBackendHealth] = useState(null);
   const [diagnosticsSummary, setDiagnosticsSummary] = useState(null);
+  const [maintenanceStatus, setMaintenanceStatus] = useState(null);
+  const [maintenanceRunning, setMaintenanceRunning] = useState(false);
   const [sessionHistory, setSessionHistory] = useState(() => loadSessionHistory());
   const [backendRuns, setBackendRuns] = useState([]);
   const [selectedRunArtifacts, setSelectedRunArtifacts] = useState([]);
@@ -251,6 +253,33 @@ export default function NexusAgentPlatform() {
       .catch(() => {
         if (isActive) {
           setDiagnosticsSummary(null);
+        }
+      });
+
+    return () => {
+      isActive = false;
+    };
+  }, [runtimeMode, backendHealth, backendBaseUrl]);
+
+  useEffect(() => {
+    let isActive = true;
+
+    if (runtimeMode !== "backend" || !backendHealth) {
+      setMaintenanceStatus(null);
+      return () => {
+        isActive = false;
+      };
+    }
+
+    fetchMaintenanceForRuntime("backend", { baseUrl: backendBaseUrl })
+      .then((maintenance) => {
+        if (isActive) {
+          setMaintenanceStatus(maintenance);
+        }
+      })
+      .catch(() => {
+        if (isActive) {
+          setMaintenanceStatus(null);
         }
       });
 
@@ -477,6 +506,27 @@ export default function NexusAgentPlatform() {
     }
   };
 
+  const runMaintenanceReview = async () => {
+    if (runtimeMode !== "backend" || maintenanceRunning) {
+      return;
+    }
+
+    setMaintenanceRunning(true);
+    try {
+      await runMaintenanceForRuntime("backend", { baseUrl: backendBaseUrl });
+      const [diagnostics, maintenance, health] = await Promise.all([
+        fetchDiagnosticsForRuntime("backend", { baseUrl: backendBaseUrl }),
+        fetchMaintenanceForRuntime("backend", { baseUrl: backendBaseUrl }),
+        fetchRuntimeHealth("backend", { baseUrl: backendBaseUrl }),
+      ]);
+      setDiagnosticsSummary(diagnostics);
+      setMaintenanceStatus(maintenance);
+      setRuntimeHealth(health);
+    } finally {
+      setMaintenanceRunning(false);
+    }
+  };
+
   return (
     <div style={{ fontFamily: "Rajdhani,sans-serif", background: "#06080c", minHeight: "100vh", color: "#c0cdd8", display: "flex", flexDirection: "column", overflow: "hidden" }}>
       <style>{`
@@ -661,6 +711,30 @@ export default function NexusAgentPlatform() {
               ) : (
                 <div style={{ fontFamily: "'Share Tech Mono',monospace", fontSize: 9, color: "#364556", lineHeight: 1.5 }}>
                   Diagnostics summary becomes available when a backend endpoint is connected.
+                </div>
+              )}
+            </div>
+            <div style={{ padding: "10px", background: "#0c1018", border: "1px solid #141c28", borderRadius: 4 }}>
+              <div style={{ fontFamily: "'Share Tech Mono',monospace", fontSize: 8, color: "#2e3d4d", letterSpacing: "0.15em", marginBottom: 6, textTransform: "uppercase" }}>Maintenance Review</div>
+              {runtimeMode === "backend" && maintenanceStatus ? (
+                <>
+                  <div style={{ display: "grid", gap: 4, fontFamily: "'Share Tech Mono',monospace", fontSize: 8, color: "#8fa0b0" }}>
+                    <div>Scheduler: {maintenanceStatus.scheduler?.mode || "disabled"}</div>
+                    <div>Auto-run: {maintenanceStatus.scheduler?.enabled ? "enabled" : "disabled"}</div>
+                    <div>Next run: {maintenanceStatus.scheduler?.nextRunAt || "n/a"}</div>
+                    <div>Last run: {maintenanceStatus.scheduler?.lastRunAt || "n/a"}</div>
+                    <div>Latest status: {maintenanceStatus.latestReview?.status || "n/a"}</div>
+                    <div>Latest summary: {maintenanceStatus.latestReview?.summary || "n/a"}</div>
+                    <div>Warnings: {maintenanceStatus.latestReview?.warningCount ?? 0}</div>
+                    <div>Failures: {maintenanceStatus.latestReview?.failureCount ?? 0}</div>
+                  </div>
+                  <button onClick={() => { void runMaintenanceReview(); }} disabled={maintenanceRunning || running} style={{ marginTop: 8, width: "100%", padding: "8px 0", background: "#111522", border: "1px solid #1a2530", borderRadius: 4, color: "#d5dde6", cursor: "pointer", fontFamily: "Rajdhani,sans-serif", fontWeight: 700, fontSize: 11, letterSpacing: "0.1em", textTransform: "uppercase" }}>
+                    {maintenanceRunning ? "Maintenance Running" : "Run Maintenance Review"}
+                  </button>
+                </>
+              ) : (
+                <div style={{ fontFamily: "'Share Tech Mono',monospace", fontSize: 9, color: "#364556", lineHeight: 1.5 }}>
+                  Maintenance review controls become available when a backend endpoint is connected.
                 </div>
               )}
             </div>

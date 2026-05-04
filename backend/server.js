@@ -4,6 +4,7 @@ import { createCorsHeaders, isOriginAllowed, loadConfig } from "./config.js";
 import { getDiagnosticSummary, listDiagnosticEvents, recordDiagnosticEvent } from "./diagnosticsStorage.js";
 import { ApiError, sendApiError, sendApiSuccess } from "./errors.js";
 import { getDefaultEngineId, getEngine, listEngines } from "./engines/index.js";
+import { getMaintenanceReviews, getMaintenanceStatus, initializeMaintenanceScheduler, runMaintenanceReview } from "./maintenanceRunner.js";
 import { getPersistenceHealth, getRunDetail, listRunSummaries, saveRunRecord } from "./storage.js";
 import { validateRunPayload } from "./validators.js";
 
@@ -119,6 +120,41 @@ const server = http.createServer(async (request, response) => {
       const limit = Number(requestUrl.searchParams.get("limit") || 20);
       const events = await listDiagnosticEvents(limit);
       sendApiSuccess(response, 200, { events }, corsHeaders);
+      return;
+    } catch (error) {
+      sendApiError(response, error, corsHeaders);
+      return;
+    }
+  }
+
+  if (request.method === "GET" && request.url === "/api/maintenance/status") {
+    try {
+      const maintenance = await getMaintenanceStatus();
+      sendApiSuccess(response, 200, { maintenance }, corsHeaders);
+      return;
+    } catch (error) {
+      sendApiError(response, error, corsHeaders);
+      return;
+    }
+  }
+
+  if (request.method === "GET" && request.url.startsWith("/api/maintenance/reviews")) {
+    try {
+      const requestUrl = new URL(request.url, `http://${request.headers.host || "127.0.0.1"}`);
+      const limit = Number(requestUrl.searchParams.get("limit") || 10);
+      const reviews = await getMaintenanceReviews(limit);
+      sendApiSuccess(response, 200, { reviews }, corsHeaders);
+      return;
+    } catch (error) {
+      sendApiError(response, error, corsHeaders);
+      return;
+    }
+  }
+
+  if (request.method === "POST" && request.url === "/api/maintenance/run") {
+    try {
+      const review = await runMaintenanceReview({ source: "manual" });
+      sendApiSuccess(response, 200, { review }, corsHeaders);
       return;
     } catch (error) {
       sendApiError(response, error, corsHeaders);
@@ -261,6 +297,7 @@ server.listen(CONFIG.port, CONFIG.host, () => {
   console.log(`Nexus backend listening on http://${CONFIG.host}:${CONFIG.port}`);
 });
 
+void initializeMaintenanceScheduler();
 void recordDiagnosticEvent({
   id: crypto.randomUUID(),
   type: "server_started",
