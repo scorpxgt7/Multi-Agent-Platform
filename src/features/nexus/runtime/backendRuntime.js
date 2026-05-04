@@ -99,3 +99,18 @@ export async function fetchBackendRunDetail(runId, baseUrl = "") {
 
   return payload.run;
 }
+
+export async function fetchBackendDiagnosticsSummary(baseUrl = "") {
+  const response = await fetch(createApiUrl("/diagnostics/summary", baseUrl));
+
+  if (!response.ok) {
+    throw new Error(await readApiError(response, `Backend diagnostics request failed with status ${response.status}`));
+  }
+
+  const payload = await response.json();
+  if (!payload.ok || !payload.diagnostics) {
+    throw new Error("Backend diagnostics response is invalid.");
+  }
+
+  return payload.diagnostics;
+}

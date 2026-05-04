@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { AGENT_COLORS, DEFAULT_AGENTS, EMPTY_STATUSES, STATUS_COLOR, TASK_PRESETS } from "./data.js";
-import { RUNTIME_OPTIONS, fetchRunDetailForRuntime, fetchRunsForRuntime, fetchRuntimeHealth, probeBackendRuntime, runPipelineWithRuntime } from "./runtime/client.js";
+import { RUNTIME_OPTIONS, fetchDiagnosticsForRuntime, fetchRunDetailForRuntime, fetchRunsForRuntime, fetchRuntimeHealth, probeBackendRuntime, runPipelineWithRuntime } from "./runtime/client.js";
 import { loadApprovalGate, loadBackendBaseUrl, loadRuntimeMode, loadSelectedEngine, loadSessionHistory, saveApprovalGate, saveBackendBaseUrl, saveRuntimeMode, saveSelectedEngine, saveSessionHistory } from "./storage.js";
 
 function AgentNode({ name, role, status, size = "sm", onClick }) {
@@ -134,6 +134,7 @@ export default function NexusAgentPlatform() {
   const [backendBaseUrl, setBackendBaseUrl] = useState(() => loadBackendBaseUrl());
   const [runtimeHealth, setRuntimeHealth] = useState(null);
   const [backendHealth, setBackendHealth] = useState(null);
+  const [diagnosticsSummary, setDiagnosticsSummary] = useState(null);
   const [sessionHistory, setSessionHistory] = useState(() => loadSessionHistory());
   const [backendRuns, setBackendRuns] = useState([]);
   const [selectedRunArtifacts, setSelectedRunArtifacts] = useState([]);
@@ -230,6 +231,33 @@ export default function NexusAgentPlatform() {
       setSelectedEngine(nextAvailableEngine?.id || runtimeHealth.defaultEngine);
     }
   }, [runtimeHealth, selectedEngine]);
+
+  useEffect(() => {
+    let isActive = true;
+
+    if (runtimeMode !== "backend" || !backendHealth) {
+      setDiagnosticsSummary(null);
+      return () => {
+        isActive = false;
+      };
+    }
+
+    fetchDiagnosticsForRuntime("backend", { baseUrl: backendBaseUrl })
+      .then((diagnostics) => {
+        if (isActive) {
+          setDiagnosticsSummary(diagnostics);
+        }
+      })
+      .catch(() => {
+        if (isActive) {
+          setDiagnosticsSummary(null);
+        }
+      });
+
+    return () => {
+      isActive = false;
+    };
+  }, [runtimeMode, backendHealth, backendBaseUrl]);
 
   useEffect(() => {
     let isActive = true;
@@ -617,6 +645,24 @@ export default function NexusAgentPlatform() {
                   <div>Public mode is running local simulation only. Add a backend endpoint or keep same-origin /api to expose server-backed execution.</div>
                 )}
               </div>
+            </div>
+            <div style={{ padding: "10px", background: "#0c1018", border: "1px solid #141c28", borderRadius: 4 }}>
+              <div style={{ fontFamily: "'Share Tech Mono',monospace", fontSize: 8, color: "#2e3d4d", letterSpacing: "0.15em", marginBottom: 6, textTransform: "uppercase" }}>Backend Diagnostics</div>
+              {runtimeMode === "backend" && diagnosticsSummary ? (
+                <div style={{ display: "grid", gap: 4, fontFamily: "'Share Tech Mono',monospace", fontSize: 8, color: "#8fa0b0" }}>
+                  <div>Total events: {diagnosticsSummary.totalEvents}</div>
+                  <div>Last 24h: {diagnosticsSummary.recentEventCount}</div>
+                  <div>Warnings: {diagnosticsSummary.byLevel?.warning || 0}</div>
+                  <div>Errors: {diagnosticsSummary.byLevel?.error || 0}</div>
+                  <div>Latest event: {diagnosticsSummary.latestEvent?.type || "n/a"}</div>
+                  <div>Latest message: {diagnosticsSummary.latestEvent?.message || "n/a"}</div>
+                  <div>Storage: {diagnosticsSummary.storage?.mode || "unknown"}</div>
+                </div>
+              ) : (
+                <div style={{ fontFamily: "'Share Tech Mono',monospace", fontSize: 9, color: "#364556", lineHeight: 1.5 }}>
+                  Diagnostics summary becomes available when a backend endpoint is connected.
+                </div>
+              )}
             </div>
             <div style={{ padding: "10px", background: "#0c1018", border: "1px solid #141c28", borderRadius: 4 }}>
               <div style={{ fontFamily: "'Share Tech Mono',monospace", fontSize: 8, color: "#2e3d4d", letterSpacing: "0.15em", marginBottom: 6, textTransform: "uppercase" }}>Recent Sessions</div>

@@ -1,6 +1,7 @@
 import http from "node:http";
 import crypto from "node:crypto";
 import { createCorsHeaders, isOriginAllowed, loadConfig } from "./config.js";
+import { getDiagnosticSummary, listDiagnosticEvents, recordDiagnosticEvent } from "./diagnosticsStorage.js";
 import { ApiError, sendApiError, sendApiSuccess } from "./errors.js";
 import { getDefaultEngineId, getEngine, listEngines } from "./engines/index.js";
 import { getPersistenceHealth, getRunDetail, listRunSummaries, saveRunRecord } from "./storage.js";
@@ -8,6 +9,7 @@ import { validateRunPayload } from "./validators.js";
 
 const CONFIG = loadConfig();
 const SERVER_STARTED_AT = Date.now();
+let lastPersistenceErrorMessage = "";
 
 function collectJson(request) {
   return new Promise((resolve, reject) => {
@@ -50,6 +52,21 @@ const server = http.createServer(async (request, response) => {
     try {
       const engines = await listEngines();
       const persistence = await getPersistenceHealth();
+      if (persistence.error && persistence.error !== lastPersistenceErrorMessage) {
+        lastPersistenceErrorMessage = persistence.error;
+        await recordDiagnosticEvent({
+          id: crypto.randomUUID(),
+          type: "persistence_degraded",
+          level: "warning",
+          message: "Persistence bridge degraded. Backend is running on fallback storage.",
+          details: {
+            mode: persistence.mode,
+            location: persistence.location,
+            error: persistence.error,
+          },
+        });
+      }
+      const diagnostics = await getDiagnosticSummary();
       sendApiSuccess(response, 200, {
         service: "nexus-backend",
         host: CONFIG.host,
@@ -65,6 +82,7 @@ const server = http.createServer(async (request, response) => {
           allowedOrigins: CONFIG.allowedOrigins,
           corsMode: CONFIG.allowedOrigins.includes("*") ? "wildcard" : "allowlist",
         },
+        diagnostics,
       }, corsHeaders);
       return;
     } catch (error) {
@@ -77,6 +95,30 @@ const server = http.createServer(async (request, response) => {
     try {
       const runs = await listRunSummaries();
       sendApiSuccess(response, 200, { runs }, corsHeaders);
+      return;
+    } catch (error) {
+      sendApiError(response, error, corsHeaders);
+      return;
+    }
+  }
+
+  if (request.method === "GET" && request.url === "/api/diagnostics/summary") {
+    try {
+      const diagnostics = await getDiagnosticSummary();
+      sendApiSuccess(response, 200, { diagnostics }, corsHeaders);
+      return;
+    } catch (error) {
+      sendApiError(response, error, corsHeaders);
+      return;
+    }
+  }
+
+  if (request.method === "GET" && request.url.startsWith("/api/diagnostics/events")) {
+    try {
+      const requestUrl = new URL(request.url, `http://${request.headers.host || "127.0.0.1"}`);
+      const limit = Number(requestUrl.searchParams.get("limit") || 20);
+      const events = await listDiagnosticEvents(limit);
+      sendApiSuccess(response, 200, { events }, corsHeaders);
       return;
     } catch (error) {
       sendApiError(response, error, corsHeaders);
@@ -148,6 +190,18 @@ const server = http.createServer(async (request, response) => {
         errorMessage: null,
       };
       await saveRunRecord(runRecord);
+      await recordDiagnosticEvent({
+        id: crypto.randomUUID(),
+        type: "run_completed",
+        level: "info",
+        message: `Backend run completed with engine ${engine.id}.`,
+        details: {
+          runId: runRecord.id,
+          engine: engine.id,
+          durationMs: runRecord.durationMs,
+          status: runRecord.status,
+        },
+      });
       sendApiSuccess(response, 200, {
         ...result,
         id: runRecord.id,
@@ -159,8 +213,9 @@ const server = http.createServer(async (request, response) => {
       if (!(error instanceof ApiError)) {
         try {
           const completedAt = new Date().toISOString();
+          const failedRunId = crypto.randomUUID();
           await saveRunRecord({
-            id: crypto.randomUUID(),
+            id: failedRunId,
             runtimeMode: "backend",
             engine: requestedEngineId,
             engineLabel: null,
@@ -179,6 +234,17 @@ const server = http.createServer(async (request, response) => {
             artifacts: [],
             errorMessage: error.message || "Backend pipeline failed.",
           });
+          await recordDiagnosticEvent({
+            id: crypto.randomUUID(),
+            type: "run_failed",
+            level: "error",
+            message: `Backend run failed with engine ${requestedEngineId}.`,
+            details: {
+              runId: failedRunId,
+              engine: requestedEngineId,
+              error: error.message || "Backend pipeline failed.",
+            },
+          });
         } catch {
           // Preserve the primary error response even if failure logging fails.
         }
@@ -193,4 +259,17 @@ const server = http.createServer(async (request, response) => {
 
 server.listen(CONFIG.port, CONFIG.host, () => {
   console.log(`Nexus backend listening on http://${CONFIG.host}:${CONFIG.port}`);
+});
+
+void recordDiagnosticEvent({
+  id: crypto.randomUUID(),
+  type: "server_started",
+  level: "info",
+  message: "Backend server started.",
+  details: {
+    host: CONFIG.host,
+    port: CONFIG.port,
+    nodeEnv: CONFIG.nodeEnv,
+    defaultEngine: CONFIG.defaultEngine,
+  },
 });

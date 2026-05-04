@@ -143,3 +143,12 @@ external model provider.
 - `GET /api/health` now reports deployment diagnostics such as host, port,
   persistence mode, uptime, public app URL, and CORS mode so the frontend can
   verify a remote backend configuration.
+
+## Observability groundwork
+
+- Backend runs now emit diagnostic events for server startup, successful runs,
+  failed runs, and persistence degradation.
+- `GET /api/diagnostics/summary` exposes a lightweight backend health history
+  summary for operator-facing diagnostics panels.
+- This is the groundwork for a future scheduled reviewer system, but no
+  autonomous fixer or scheduler is enabled yet.

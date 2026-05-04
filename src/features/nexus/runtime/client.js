@@ -1,4 +1,4 @@
-import { fetchBackendHealth, fetchBackendRunDetail, fetchBackendRuns, runBackendPipeline } from "./backendRuntime.js";
+import { fetchBackendDiagnosticsSummary, fetchBackendHealth, fetchBackendRunDetail, fetchBackendRuns, runBackendPipeline } from "./backendRuntime.js";
 import { runLocalPipeline } from "./localRuntime.js";
 
 export const RUNTIME_OPTIONS = [
@@ -54,4 +54,12 @@ export async function probeBackendRuntime(baseUrl = "") {
   } catch {
     return null;
   }
+}
+
+export async function fetchDiagnosticsForRuntime(runtimeMode, options = {}) {
+  if (runtimeMode === "backend") {
+    return fetchBackendDiagnosticsSummary(options.baseUrl);
+  }
+
+  return null;
 }
