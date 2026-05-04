@@ -1,4 +1,4 @@
-import NexusAgentPlatform from "../nexus-agent-platform.jsx";
+import NexusAgentPlatform from "./features/nexus/NexusAgentPlatform.jsx";
 
 export default function App() {
   return <NexusAgentPlatform />;
