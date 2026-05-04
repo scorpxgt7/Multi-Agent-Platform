@@ -14,12 +14,20 @@ function readJson(key, fallback) {
   }
 }
 
+function writeJson(key, value) {
+  try {
+    window.localStorage.setItem(key, JSON.stringify(value));
+  } catch {
+    // Ignore storage failures so the UI can still render in locked-down browsers.
+  }
+}
+
 export function loadRuntimeMode() {
   return readJson(STORAGE_KEYS.runtimeMode, "local");
 }
 
 export function saveRuntimeMode(runtimeMode) {
-  window.localStorage.setItem(STORAGE_KEYS.runtimeMode, JSON.stringify(runtimeMode));
+  writeJson(STORAGE_KEYS.runtimeMode, runtimeMode);
 }
 
 export function loadSelectedEngine() {
@@ -27,7 +35,7 @@ export function loadSelectedEngine() {
 }
 
 export function saveSelectedEngine(engineId) {
-  window.localStorage.setItem(STORAGE_KEYS.selectedEngine, JSON.stringify(engineId));
+  writeJson(STORAGE_KEYS.selectedEngine, engineId);
 }
 
 export function loadSessionHistory() {
@@ -35,7 +43,7 @@ export function loadSessionHistory() {
 }
 
 export function saveSessionHistory(history) {
-  window.localStorage.setItem(STORAGE_KEYS.sessionHistory, JSON.stringify(history.slice(0, 8)));
+  writeJson(STORAGE_KEYS.sessionHistory, history.slice(0, 8));
 }
 
 export function loadApprovalGate() {
@@ -43,5 +51,5 @@ export function loadApprovalGate() {
 }
 
 export function saveApprovalGate(enabled) {
-  window.localStorage.setItem(STORAGE_KEYS.approvalGate, JSON.stringify(Boolean(enabled)));
+  writeJson(STORAGE_KEYS.approvalGate, Boolean(enabled));
 }
