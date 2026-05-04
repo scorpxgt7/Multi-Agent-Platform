@@ -66,6 +66,8 @@ external model provider.
   build when the site is served from the repository root on GitHub Pages.
 - The `docs/` build now uses stable asset names so stale cached HTML does not
   break the site when new commits are pushed.
+- The docs build also mirrors `assets/app.js` and `assets/app.css` to the repo
+  root so older legacy root HTML can still resolve the live bundle.
 
 ## Phase 5 notes
 
