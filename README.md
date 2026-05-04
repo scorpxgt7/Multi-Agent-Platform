@@ -58,16 +58,15 @@ external model provider.
 
 ## GitHub Pages
 
-- The repository currently works with GitHub Pages' legacy branch deployment by
-  bootstrapping the committed `docs/` build from the repository root page.
-- `.github/workflows/deploy-pages.yml` now builds and deploys the Vite app to
-  GitHub Pages on every push to `main`.
-- As a branch-root fallback, `index.html` now bootstraps the committed `docs/`
-  build when the site is served from the repository root on GitHub Pages.
-- The `docs/` build now uses stable asset names so stale cached HTML does not
-  break the site when new commits are pushed.
-- The docs build also mirrors `assets/app.js` and `assets/app.css` to the repo
-  root so older legacy root HTML can still resolve the live bundle.
+- The public site now assumes one production path only: legacy GitHub Pages
+  branch deployment from `main /`.
+- The repository root `index.html` loads the root-level `assets/app.js` and
+  `assets/app.css` bundle directly for the live site.
+- `npm run build` now refreshes the root-level public assets from `dist/assets`
+  so the committed Pages bundle stays aligned with the main build output.
+- The GitHub Actions workflow is now build verification only. It no longer
+  pretends to be the deployment source while the repository is still using
+  legacy Pages mode.
 - The public Pages site is local-first by design. Backend runtime controls are
   only exposed when `/api/health` is reachable from the current host.
 

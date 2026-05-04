@@ -8,11 +8,9 @@
   <body style="margin:0;background:#06080c;color:#dce8f0;font-family:Arial,sans-serif;">
     <div id="root"></div>
     <script>
-      const isGitHubPagesHost = window.location.hostname.endsWith("github.io");
       const isDirectFileOpen = window.location.protocol === "file:";
       const isBuiltEntry = /[\\\/]dist[\\\/]index\.html$/i.test(window.location.pathname);
-      const isDocsEntry = /\/docs\/?$|\/docs\/index\.html$/i.test(window.location.pathname);
-      if (isDirectFileOpen && !isBuiltEntry && !isDocsEntry) {
+      if (isDirectFileOpen && !isBuiltEntry) {
         const root = document.getElementById("root");
         root.innerHTML = `
           <div style="min-height:100vh;display:flex;align-items:center;justify-content:center;padding:24px;">
@@ -28,19 +26,20 @@
       }
     </script>
     <script>
-      if (!isDirectFileOpen || isBuiltEntry || isDocsEntry) {
+      if (!isDirectFileOpen || isBuiltEntry) {
         const moduleScript = document.createElement("script");
         moduleScript.type = "module";
+        const isLocalDevHost = window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1";
         let stylesheetHref = "";
 
-        if (isGitHubPagesHost && !isDocsEntry) {
-          stylesheetHref = "./docs/assets/app.css";
-          moduleScript.src = "./docs/assets/app.js";
+        if (isLocalDevHost && !isBuiltEntry) {
+          moduleScript.src = "/src/main.jsx";
         } else if (isBuiltEntry) {
           stylesheetHref = "./assets/app.css";
           moduleScript.src = "./assets/app.js";
         } else {
-          moduleScript.src = "/src/main.jsx";
+          stylesheetHref = "./assets/app.css";
+          moduleScript.src = "./assets/app.js";
         }
 
         if (stylesheetHref) {
