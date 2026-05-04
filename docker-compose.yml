@@ -1,0 +1,22 @@
+services:
+  nexus-backend:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    container_name: nexus-backend
+    ports:
+      - "8787:8787"
+    environment:
+      HOST: 0.0.0.0
+      PORT: 8787
+      BACKEND_BASE_URL: http://127.0.0.1:8787
+      PUBLIC_APP_URL: https://scorpxgt7.github.io/Multi-Agent-Platform/
+      CORS_ALLOWED_ORIGINS: https://scorpxgt7.github.io
+      NEXUS_ENGINE: local-simulation
+      NEXUS_API_KEY: change-me-before-public-deploy
+      NEXUS_PERSISTENCE_MODE: sqlite
+      MAINTENANCE_AUTORUN: "true"
+      MAINTENANCE_DAILY_UTC: "06:00"
+    volumes:
+      - ./backend/data:/app/backend/data
+    restart: unless-stopped

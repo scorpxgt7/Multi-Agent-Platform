@@ -42,6 +42,19 @@ external model provider.
 6. Run the backend smoke check against a live backend:
    `npm run smoke:backend`
 
+## Deployment packaging
+
+- Backend container image: [backend/Dockerfile](D:/Multi-Agent%20Platform/backend/Dockerfile)
+- Example Compose deployment: [docker-compose.yml](D:/Multi-Agent%20Platform/docker-compose.yml)
+- Docker healthcheck uses the same backend smoke test path so the container only
+  reports healthy when the API and protected maintenance endpoint both respond.
+- Persist backend data by mounting `backend/data` in the container runtime.
+- For a strict deployment, set:
+  - `NEXUS_PERSISTENCE_MODE=sqlite`
+  - `NEXUS_API_KEY`
+  - `CORS_ALLOWED_ORIGINS`
+  - `PUBLIC_APP_URL`
+
 ## Phase 3 notes
 
 - No external API is required to run the current app.
@@ -156,6 +169,8 @@ external model provider.
   warnings without opening a listener.
 - `npm run smoke:backend` checks live backend health plus protected maintenance
   access against a running backend instance.
+- The repo now includes backend container packaging and a sample Compose file for
+  repeatable deployment.
 
 ## Observability groundwork
 
@@ -178,3 +193,13 @@ external model provider.
   backend environments can still be operated from the same shell.
 - This is the groundwork for a future scheduled reviewer system, but no
   autonomous fixer is enabled yet.
+
+## Release checklist
+
+1. Set `PUBLIC_APP_URL` to the real frontend URL.
+2. Set `CORS_ALLOWED_ORIGINS` to explicit allowed origins only.
+3. Set `NEXUS_API_KEY` for any shared or public backend deployment.
+4. Set `NEXUS_PERSISTENCE_MODE=sqlite` for strict deployments.
+5. Run `npm run validate:backend`.
+6. Start the backend and run `npm run smoke:backend`.
+7. Confirm `/api/health` reports the expected auth, persistence, and deployment diagnostics.

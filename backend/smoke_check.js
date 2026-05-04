@@ -1,4 +1,5 @@
-const baseUrl = (process.env.BACKEND_BASE_URL || "http://127.0.0.1:8787").replace(/\/+$/, "");
+const resolvedDefaultBaseUrl = `http://127.0.0.1:${process.env.PORT || "8787"}`;
+const baseUrl = (process.env.BACKEND_BASE_URL || resolvedDefaultBaseUrl).replace(/\/+$/, "");
 const apiKey = (process.env.NEXUS_API_KEY || "").trim();
 
 function buildHeaders(includeJson = false) {
