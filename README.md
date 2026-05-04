@@ -46,6 +46,9 @@ external model provider.
 
 - Backend container image: [backend/Dockerfile](D:/Multi-Agent%20Platform/backend/Dockerfile)
 - Example Compose deployment: [docker-compose.yml](D:/Multi-Agent%20Platform/docker-compose.yml)
+- Host-specific rollout guide: [DEPLOYMENT.md](D:/Multi-Agent%20Platform/DEPLOYMENT.md)
+- Production env template: [deploy/env.production.example](D:/Multi-Agent%20Platform/deploy/env.production.example)
+- Nginx reverse-proxy example: [deploy/nginx.api.conf.example](D:/Multi-Agent%20Platform/deploy/nginx.api.conf.example)
 - Docker healthcheck uses the same backend smoke test path so the container only
   reports healthy when the API and protected maintenance endpoint both respond.
 - Persist backend data by mounting `backend/data` in the container runtime.
