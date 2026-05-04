@@ -92,6 +92,14 @@ external model provider.
 - Those skill profiles are visible in the UI and are used in runtime-generated
   plans, directives, and specialist outputs.
 
+## Workflow modes
+
+- The task intake now exposes first-class workflow presets for discovery,
+  operations, product planning, content operations, and QA review.
+- The UI also surfaces run metadata such as runtime, engine, duration, artifact
+  count, and failure state so operators can inspect runs without opening raw
+  logs first.
+
 ## Backend run inspection
 
 - Backend runs now persist richer artifacts, including per-agent outputs.

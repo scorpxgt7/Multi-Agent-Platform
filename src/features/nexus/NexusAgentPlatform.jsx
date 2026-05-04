@@ -91,6 +91,7 @@ function AgentEditor({ agent, color, onSave, onCancel }) {
 }
 
 export default function NexusAgentPlatform() {
+  const [selectedPresetId, setSelectedPresetId] = useState(TASK_PRESETS[0].id);
   const [agents, setAgents] = useState(DEFAULT_AGENTS);
   const [task, setTask] = useState(TASK_PRESETS[0].task);
   const [running, setRunning] = useState(false);
@@ -107,6 +108,7 @@ export default function NexusAgentPlatform() {
   const [sessionHistory, setSessionHistory] = useState(() => loadSessionHistory());
   const [backendRuns, setBackendRuns] = useState([]);
   const [selectedRunArtifacts, setSelectedRunArtifacts] = useState([]);
+  const [selectedRunMeta, setSelectedRunMeta] = useState(null);
   const [showConfig, setShowConfig] = useState(false);
   const [editAgent, setEditAgent] = useState(null);
   const logRef = useRef(null);
@@ -267,9 +269,11 @@ export default function NexusAgentPlatform() {
     resetAll();
 
     const activeAgents = agentsRef.current;
+    const startedAt = new Date().toISOString();
 
     try {
       const result = await runPipelineWithRuntime(runtimeMode, { task, agents: activeAgents, engine: selectedEngine });
+      const completedAt = new Date().toISOString();
       result.statuses.forEach((entry) => {
         setStatus(entry.id, entry.status);
       });
@@ -284,6 +288,13 @@ export default function NexusAgentPlatform() {
           id: Date.now(),
           runtimeMode,
           engine: result.engine || runtimeHealth?.defaultEngine || "local-simulation",
+          engineLabel: result.engineLabel || result.engine || runtimeHealth?.defaultEngine || "local-simulation",
+          status: "completed",
+          startedAt,
+          completedAt,
+          durationMs: Math.max(0, new Date(completedAt).getTime() - new Date(startedAt).getTime()),
+          artifactCount: activeAgents.length,
+          errorMessage: null,
           task,
           time: new Date().toLocaleString("en-US"),
           finalOutput: result.finalOutput,
@@ -294,9 +305,33 @@ export default function NexusAgentPlatform() {
         const runs = await fetchRunsForRuntime("backend");
         setBackendRuns(runs);
       }
+      setSelectedRunMeta({
+        id: result.id || Date.now(),
+        runtimeMode,
+        engine: result.engine || runtimeHealth?.defaultEngine || "local-simulation",
+        engineLabel: result.engineLabel || result.engine || runtimeHealth?.defaultEngine || "local-simulation",
+        status: "completed",
+        startedAt,
+        completedAt,
+        durationMs: Math.max(0, new Date(completedAt).getTime() - new Date(startedAt).getTime()),
+        artifactCount: activeAgents.length,
+        errorMessage: null,
+      });
       setSelectedRunArtifacts([]);
     } catch (error) {
       addLog("SYSTEM", `Error: ${error.message}`, "error");
+      setSelectedRunMeta({
+        id: null,
+        runtimeMode,
+        engine: runtimeMode === "backend" ? selectedEngine : "local-simulation",
+        engineLabel: runtimeMode === "backend" ? selectedEngine : "local-simulation",
+        status: "failed",
+        startedAt,
+        completedAt: null,
+        durationMs: null,
+        artifactCount: 0,
+        errorMessage: error.message,
+      });
       setPhase("error");
     } finally {
       setRunning(false);
@@ -310,10 +345,23 @@ export default function NexusAgentPlatform() {
     ? RUNTIME_OPTIONS
     : RUNTIME_OPTIONS.filter((option) => option.value !== "backend");
   const availableBackendEngines = (runtimeHealth?.engines || []).filter((engine) => engine.available !== false);
+  const selectedPreset = TASK_PRESETS.find((preset) => preset.id === selectedPresetId) || TASK_PRESETS[0];
   const openSavedSession = async (session) => {
     setTask(session.task);
     setFinalOutput(session.finalOutput);
     setActiveTab("output");
+    setSelectedRunMeta({
+      id: session.id,
+      runtimeMode: session.runtimeMode,
+      engine: session.engine || null,
+      engineLabel: session.engineLabel || session.engine || null,
+      status: session.status || "completed",
+      startedAt: session.startedAt || null,
+      completedAt: session.completedAt || null,
+      durationMs: session.durationMs ?? null,
+      artifactCount: session.artifactCount ?? null,
+      errorMessage: session.errorMessage || null,
+    });
 
     if (runtimeMode !== "backend") {
       setSelectedRunArtifacts([]);
@@ -324,6 +372,18 @@ export default function NexusAgentPlatform() {
       const detail = await fetchRunDetailForRuntime("backend", session.id);
       setLog(detail.entries || []);
       setSelectedRunArtifacts(detail.artifacts || []);
+      setSelectedRunMeta({
+        id: detail.id,
+        runtimeMode: detail.runtimeMode,
+        engine: detail.engine || null,
+        engineLabel: detail.engineLabel || detail.engine || null,
+        status: detail.status || "completed",
+        startedAt: detail.startedAt || null,
+        completedAt: detail.completedAt || null,
+        durationMs: detail.durationMs ?? null,
+        artifactCount: Array.isArray(detail.artifacts) ? detail.artifacts.length : null,
+        errorMessage: detail.errorMessage || null,
+      });
       setPhase("complete");
     } catch (error) {
       addLog("SYSTEM", `Error: ${error.message}`, "error");
@@ -441,10 +501,17 @@ export default function NexusAgentPlatform() {
             </label>
             <div style={{ display: "grid", gap: 8 }}>
               {TASK_PRESETS.map((preset) => (
-                <button key={preset.label} type="button" disabled={running} onClick={() => setTask(preset.task)} style={{ textAlign: "left", padding: "9px 11px", background: "#0b0e15", border: "1px solid #1a2530", borderRadius: 4, color: "#8fa0b0", cursor: "pointer", fontFamily: "'Share Tech Mono',monospace", fontSize: 10 }}>
-                  {preset.label}
+                <button key={preset.id} type="button" disabled={running} onClick={() => { setTask(preset.task); setSelectedPresetId(preset.id); }} style={{ textAlign: "left", padding: "9px 11px", background: selectedPresetId === preset.id ? "#111522" : "#0b0e15", border: `1px solid ${selectedPresetId === preset.id ? "#f59e0b55" : "#1a2530"}`, borderRadius: 4, color: selectedPresetId === preset.id ? "#d5dde6" : "#8fa0b0", cursor: "pointer", fontFamily: "'Share Tech Mono',monospace", fontSize: 10 }}>
+                  <div>{preset.label}</div>
+                  <div style={{ marginTop: 4, color: "#4a5870", fontSize: 8 }}>{preset.category} - {preset.outcome}</div>
                 </button>
               ))}
+            </div>
+            <div style={{ padding: "10px", background: "#0c1018", border: "1px solid #141c28", borderRadius: 4 }}>
+              <div style={{ fontFamily: "'Share Tech Mono',monospace", fontSize: 8, color: "#2e3d4d", letterSpacing: "0.15em", marginBottom: 6, textTransform: "uppercase" }}>Workflow Mode</div>
+              <div style={{ fontFamily: "Rajdhani,sans-serif", fontWeight: 700, fontSize: 14, color: "#dce8f0", marginBottom: 4 }}>{selectedPreset.label}</div>
+              <div style={{ fontFamily: "'Share Tech Mono',monospace", fontSize: 9, color: "#8fa0b0", lineHeight: 1.5, marginBottom: 6 }}>{selectedPreset.summary}</div>
+              <div style={{ fontFamily: "'Share Tech Mono',monospace", fontSize: 8, color: "#4a5870" }}>Expected outcome: {selectedPreset.outcome}</div>
             </div>
             <textarea value={task} onChange={(event) => setTask(event.target.value)} disabled={running} placeholder="Describe the task to assign to the team..." rows={6} style={{ background: "#0b0e15", border: "1px solid #1a2530", borderRadius: 4, color: "#8fa0b0", padding: "9px 11px", fontFamily: "'Share Tech Mono',monospace", fontSize: 11, lineHeight: 1.5, outline: "none", width: "100%" }} />
             <button onClick={runPipeline} disabled={running || !task.trim()} style={{ padding: "10px 0", background: running ? "#0f1820" : "linear-gradient(135deg,#f59e0b1a,#f59e0b0a)", border: `1px solid ${running ? "#1a2530" : "#f59e0b45"}`, borderRadius: 4, color: running ? "#364556" : "#f59e0b", cursor: "pointer", fontFamily: "Rajdhani,sans-serif", fontWeight: 700, fontSize: 13, letterSpacing: "0.14em", textTransform: "uppercase", width: "100%" }}>
@@ -501,6 +568,25 @@ export default function NexusAgentPlatform() {
                   ))
                 )}
               </div>
+            </div>
+            <div style={{ padding: "10px", background: "#0c1018", border: "1px solid #141c28", borderRadius: 4 }}>
+              <div style={{ fontFamily: "'Share Tech Mono',monospace", fontSize: 8, color: "#2e3d4d", letterSpacing: "0.15em", marginBottom: 6, textTransform: "uppercase" }}>Run Metadata</div>
+              {selectedRunMeta ? (
+                <div style={{ display: "grid", gap: 4, fontFamily: "'Share Tech Mono',monospace", fontSize: 8, color: "#8fa0b0" }}>
+                  <div>Status: {selectedRunMeta.status || "unknown"}</div>
+                  <div>Runtime: {selectedRunMeta.runtimeMode || "unknown"}</div>
+                  <div>Engine: {selectedRunMeta.engineLabel || selectedRunMeta.engine || "n/a"}</div>
+                  <div>Artifacts: {selectedRunMeta.artifactCount ?? "n/a"}</div>
+                  <div>Duration: {selectedRunMeta.durationMs != null ? `${selectedRunMeta.durationMs} ms` : "n/a"}</div>
+                  <div>Started: {selectedRunMeta.startedAt || "n/a"}</div>
+                  <div>Completed: {selectedRunMeta.completedAt || "n/a"}</div>
+                  {selectedRunMeta.errorMessage && <div style={{ color: "#ef4444" }}>Error: {selectedRunMeta.errorMessage}</div>}
+                </div>
+              ) : (
+                <div style={{ fontFamily: "'Share Tech Mono',monospace", fontSize: 9, color: "#364556", lineHeight: 1.5 }}>
+                  Run metadata appears here after a local run or when you open a saved session.
+                </div>
+              )}
             </div>
             <div style={{ padding: "10px", background: "#0c1018", border: "1px solid #141c28", borderRadius: 4 }}>
               <div style={{ fontFamily: "'Share Tech Mono',monospace", fontSize: 8, color: "#2e3d4d", letterSpacing: "0.15em", marginBottom: 6, textTransform: "uppercase" }}>Run Artifacts</div>
