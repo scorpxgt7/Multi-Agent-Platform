@@ -1,19 +1,11 @@
 import http from "node:http";
 import crypto from "node:crypto";
+import { ApiError, sendApiError, sendApiSuccess } from "./errors.js";
 import { getDefaultEngineId, getEngine, listEngines } from "./engines/index.js";
 import { getPersistenceHealth, getRunDetail, listRunSummaries, saveRunRecord } from "./storage.js";
+import { validateRunPayload } from "./validators.js";
 
 const PORT = Number(process.env.PORT || 8787);
-
-function sendJson(response, statusCode, payload) {
-  response.writeHead(statusCode, {
-    "Content-Type": "application/json; charset=utf-8",
-    "Access-Control-Allow-Origin": "*",
-    "Access-Control-Allow-Headers": "Content-Type",
-    "Access-Control-Allow-Methods": "GET,POST,OPTIONS",
-  });
-  response.end(JSON.stringify(payload));
-}
 
 function collectJson(request) {
   return new Promise((resolve, reject) => {
@@ -34,36 +26,45 @@ function collectJson(request) {
 
 const server = http.createServer(async (request, response) => {
   if (!request.url) {
-    sendJson(response, 400, { error: "Missing request URL." });
+    sendApiError(response, new ApiError(400, "missing_url", "Missing request URL."));
     return;
   }
 
   if (request.method === "OPTIONS") {
-    sendJson(response, 204, {});
+    response.writeHead(204, {
+      "Access-Control-Allow-Origin": "*",
+      "Access-Control-Allow-Headers": "Content-Type",
+      "Access-Control-Allow-Methods": "GET,POST,OPTIONS",
+    });
+    response.end();
     return;
   }
 
   if (request.method === "GET" && request.url === "/api/health") {
-    const engines = await listEngines();
-    const persistence = await getPersistenceHealth();
-    sendJson(response, 200, {
-      ok: true,
-      service: "nexus-backend",
-      port: PORT,
-      defaultEngine: getDefaultEngineId(),
-      engines,
-      persistence,
-    });
-    return;
+    try {
+      const engines = await listEngines();
+      const persistence = await getPersistenceHealth();
+      sendApiSuccess(response, 200, {
+        service: "nexus-backend",
+        port: PORT,
+        defaultEngine: getDefaultEngineId(),
+        engines,
+        persistence,
+      });
+      return;
+    } catch (error) {
+      sendApiError(response, error);
+      return;
+    }
   }
 
   if (request.method === "GET" && request.url === "/api/nexus/runs") {
     try {
       const runs = await listRunSummaries();
-      sendJson(response, 200, { runs });
+      sendApiSuccess(response, 200, { runs });
       return;
     } catch (error) {
-      sendJson(response, 500, { error: error.message || "Failed to load runs." });
+      sendApiError(response, error);
       return;
     }
   }
@@ -74,14 +75,14 @@ const server = http.createServer(async (request, response) => {
       const run = await getRunDetail(runId);
 
       if (!run) {
-        sendJson(response, 404, { error: "Run not found." });
+        sendApiError(response, new ApiError(404, "run_not_found", "Run not found."));
         return;
       }
 
-      sendJson(response, 200, { run });
+      sendApiSuccess(response, 200, { run });
       return;
     } catch (error) {
-      sendJson(response, 500, { error: error.message || "Failed to load run detail." });
+      sendApiError(response, error);
       return;
     }
   }
@@ -93,22 +94,12 @@ const server = http.createServer(async (request, response) => {
 
     try {
       const payload = await collectJson(request);
-      task = typeof payload.task === "string" ? payload.task.trim() : "";
-      const agents = Array.isArray(payload.agents) ? payload.agents : [];
-      requestedEngineId = typeof payload.engine === "string" && payload.engine.trim()
-        ? payload.engine.trim()
-        : getDefaultEngineId();
+      const availableEngines = await listEngines();
+      const validated = validateRunPayload(payload, availableEngines);
+      task = validated.task;
+      const agents = validated.agents;
+      requestedEngineId = validated.requestedEngineId || getDefaultEngineId();
       const engine = getEngine(requestedEngineId);
-
-      if (!task) {
-        sendJson(response, 400, { error: "Task is required." });
-        return;
-      }
-
-      if (!agents.length) {
-        sendJson(response, 400, { error: "At least one agent is required." });
-        return;
-      }
 
       startedAt = new Date().toISOString();
       const result = await engine.run({ task, agents });
@@ -142,7 +133,7 @@ const server = http.createServer(async (request, response) => {
         errorMessage: null,
       };
       await saveRunRecord(runRecord);
-      sendJson(response, 200, {
+      sendApiSuccess(response, 200, {
         ...result,
         id: runRecord.id,
         engine: engine.id,
@@ -150,37 +141,39 @@ const server = http.createServer(async (request, response) => {
       });
       return;
     } catch (error) {
-      try {
-        const completedAt = new Date().toISOString();
-        await saveRunRecord({
-          id: crypto.randomUUID(),
-          runtimeMode: "backend",
-          engine: requestedEngineId,
-          engineLabel: null,
-          task,
-          time: new Date().toLocaleString("en-US"),
-          status: "failed",
-          startedAt,
-          completedAt,
-          durationMs: Math.max(0, new Date(completedAt).getTime() - new Date(startedAt).getTime()),
-          finalOutput: "",
-          entries: [],
-          statuses: [],
-          managerPlan: "",
-          supervisorBrief: "",
-          synthesis: "",
-          artifacts: [],
-          errorMessage: error.message || "Backend pipeline failed.",
-        });
-      } catch {
-        // Preserve the primary error response even if failure logging fails.
+      if (!(error instanceof ApiError)) {
+        try {
+          const completedAt = new Date().toISOString();
+          await saveRunRecord({
+            id: crypto.randomUUID(),
+            runtimeMode: "backend",
+            engine: requestedEngineId,
+            engineLabel: null,
+            task,
+            time: new Date().toLocaleString("en-US"),
+            status: "failed",
+            startedAt,
+            completedAt,
+            durationMs: Math.max(0, new Date(completedAt).getTime() - new Date(startedAt).getTime()),
+            finalOutput: "",
+            entries: [],
+            statuses: [],
+            managerPlan: "",
+            supervisorBrief: "",
+            synthesis: "",
+            artifacts: [],
+            errorMessage: error.message || "Backend pipeline failed.",
+          });
+        } catch {
+          // Preserve the primary error response even if failure logging fails.
+        }
       }
-      sendJson(response, 500, { error: error.message || "Backend pipeline failed." });
+      sendApiError(response, error);
       return;
     }
   }
 
-  sendJson(response, 404, { error: "Not found." });
+  sendApiError(response, new ApiError(404, "not_found", "Not found."));
 });
 
 server.listen(PORT, "127.0.0.1", () => {

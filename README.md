@@ -57,6 +57,8 @@ external model provider.
   development.
 - The backend currently uses the same orchestration logic as the local runtime,
   but it already matches the contract needed for a future model-backed service.
+- Backend routes now return structured JSON errors with stable codes and
+  validation details so the frontend can handle failures consistently.
 
 ## GitHub Pages
 
