@@ -68,6 +68,8 @@ external model provider.
   break the site when new commits are pushed.
 - The docs build also mirrors `assets/app.js` and `assets/app.css` to the repo
   root so older legacy root HTML can still resolve the live bundle.
+- The public Pages site is local-first by design. Backend runtime controls are
+  only exposed when `/api/health` is reachable from the current host.
 
 ## Phase 5 notes
 

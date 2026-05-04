@@ -47,3 +47,11 @@ export async function fetchRuntimeHealth(runtimeMode) {
     ],
   };
 }
+
+export async function probeBackendRuntime() {
+  try {
+    return await fetchBackendHealth();
+  } catch {
+    return null;
+  }
+}

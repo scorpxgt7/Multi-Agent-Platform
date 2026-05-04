@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { AGENT_COLORS, DEFAULT_AGENTS, EMPTY_STATUSES, STATUS_COLOR, TASK_PRESETS } from "./data.js";
-import { RUNTIME_OPTIONS, fetchRunDetailForRuntime, fetchRunsForRuntime, fetchRuntimeHealth, runPipelineWithRuntime } from "./runtime/client.js";
+import { RUNTIME_OPTIONS, fetchRunDetailForRuntime, fetchRunsForRuntime, fetchRuntimeHealth, probeBackendRuntime, runPipelineWithRuntime } from "./runtime/client.js";
 import { loadApprovalGate, loadRuntimeMode, loadSelectedEngine, loadSessionHistory, saveApprovalGate, saveRuntimeMode, saveSelectedEngine, saveSessionHistory } from "./storage.js";
 
 function AgentNode({ name, role, status, size = "sm", onClick }) {
@@ -103,6 +103,7 @@ export default function NexusAgentPlatform() {
   const [selectedEngine, setSelectedEngine] = useState(() => loadSelectedEngine());
   const [approvalRequired, setApprovalRequired] = useState(() => loadApprovalGate());
   const [runtimeHealth, setRuntimeHealth] = useState(null);
+  const [backendHealth, setBackendHealth] = useState(null);
   const [sessionHistory, setSessionHistory] = useState(() => loadSessionHistory());
   const [backendRuns, setBackendRuns] = useState([]);
   const [selectedRunArtifacts, setSelectedRunArtifacts] = useState([]);
@@ -159,6 +160,26 @@ export default function NexusAgentPlatform() {
   }, [runtimeMode]);
 
   useEffect(() => {
+    let isActive = true;
+
+    probeBackendRuntime().then((health) => {
+      if (isActive) {
+        setBackendHealth(health);
+      }
+    });
+
+    return () => {
+      isActive = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (runtimeMode === "backend" && !backendHealth) {
+      setRuntimeMode("local");
+    }
+  }, [runtimeMode, backendHealth]);
+
+  useEffect(() => {
     if (!runtimeHealth?.engines?.length) {
       return;
     }
@@ -172,7 +193,7 @@ export default function NexusAgentPlatform() {
   useEffect(() => {
     let isActive = true;
 
-    if (runtimeMode !== "backend") {
+    if (runtimeMode !== "backend" || !backendHealth) {
       setBackendRuns([]);
       return () => {
         isActive = false;
@@ -284,6 +305,9 @@ export default function NexusAgentPlatform() {
   const phaseLabel = phase === "complete" ? "COMPLETE" : phase === "error" ? "ERROR" : running ? "ACTIVE" : "STANDBY";
   const phaseDot = phase === "complete" ? "#10b981" : phase === "error" ? "#ef4444" : running ? "#f59e0b" : "#252f3a";
   const visibleSessions = runtimeMode === "backend" ? backendRuns : sessionHistory;
+  const availableRuntimeOptions = backendHealth
+    ? RUNTIME_OPTIONS
+    : RUNTIME_OPTIONS.filter((option) => option.value !== "backend");
   const openSavedSession = async (session) => {
     setTask(session.task);
     setFinalOutput(session.finalOutput);
@@ -387,24 +411,26 @@ export default function NexusAgentPlatform() {
             <div>
               <div style={{ fontFamily: "'Share Tech Mono',monospace", fontSize: 8, color: "#2e3d4d", letterSpacing: "0.15em", textTransform: "uppercase", marginBottom: 6 }}>Runtime Mode</div>
               <select value={runtimeMode} onChange={(event) => setRuntimeMode(event.target.value)} disabled={running} style={{ width: "100%", background: "#0b0e15", border: "1px solid #1a2530", borderRadius: 4, color: "#8fa0b0", padding: "9px 11px", fontFamily: "'Share Tech Mono',monospace", fontSize: 10 }}>
-                {RUNTIME_OPTIONS.map((option) => (
+                {availableRuntimeOptions.map((option) => (
                   <option key={option.value} value={option.value}>{option.label}</option>
                 ))}
               </select>
             </div>
-            <div>
-              <div style={{ fontFamily: "'Share Tech Mono',monospace", fontSize: 8, color: "#2e3d4d", letterSpacing: "0.15em", textTransform: "uppercase", marginBottom: 6 }}>Execution Engine</div>
-              <select
-                value={selectedEngine}
-                onChange={(event) => setSelectedEngine(event.target.value)}
-                disabled={running || !runtimeHealth?.engines?.length}
-                style={{ width: "100%", background: "#0b0e15", border: "1px solid #1a2530", borderRadius: 4, color: "#8fa0b0", padding: "9px 11px", fontFamily: "'Share Tech Mono',monospace", fontSize: 10 }}
-              >
-                {(runtimeHealth?.engines || []).map((engine) => (
-                  <option key={engine.id} value={engine.id}>{engine.label}</option>
-                ))}
-              </select>
-            </div>
+            {runtimeMode === "backend" && (
+              <div>
+                <div style={{ fontFamily: "'Share Tech Mono',monospace", fontSize: 8, color: "#2e3d4d", letterSpacing: "0.15em", textTransform: "uppercase", marginBottom: 6 }}>Execution Engine</div>
+                <select
+                  value={selectedEngine}
+                  onChange={(event) => setSelectedEngine(event.target.value)}
+                  disabled={running || !runtimeHealth?.engines?.length}
+                  style={{ width: "100%", background: "#0b0e15", border: "1px solid #1a2530", borderRadius: 4, color: "#8fa0b0", padding: "9px 11px", fontFamily: "'Share Tech Mono',monospace", fontSize: 10 }}
+                >
+                  {(runtimeHealth?.engines || []).map((engine) => (
+                    <option key={engine.id} value={engine.id}>{engine.label}</option>
+                  ))}
+                </select>
+              </div>
+            )}
             <label style={{ display: "flex", alignItems: "center", gap: 8, padding: "10px", background: "#0c1018", border: "1px solid #141c28", borderRadius: 4, cursor: "pointer" }}>
               <input type="checkbox" checked={approvalRequired} onChange={(event) => setApprovalRequired(event.target.checked)} disabled={running} />
               <span style={{ fontFamily: "'Share Tech Mono',monospace", fontSize: 9, color: "#8fa0b0", lineHeight: 1.5 }}>
@@ -436,15 +462,17 @@ export default function NexusAgentPlatform() {
             <div style={{ padding: "10px", background: "#0c1018", border: "1px solid #141c28", borderRadius: 4 }}>
               <div style={{ fontFamily: "'Share Tech Mono',monospace", fontSize: 8, color: "#2e3d4d", letterSpacing: "0.15em", marginBottom: 6, textTransform: "uppercase" }}>Runtime Health</div>
               <div style={{ fontFamily: "'Share Tech Mono',monospace", fontSize: 9, color: "#364556", lineHeight: 1.5 }}>
-                {runtimeHealth ? (
+                {runtimeMode === "backend" && runtimeHealth ? (
                   <>
                     <div>Service: {runtimeHealth.service}</div>
                     <div>Default engine: {runtimeHealth.defaultEngine}</div>
                     <div>Selected engine: {selectedEngine}</div>
                     <div>Engines: {runtimeHealth.engines.map((engine) => `${engine.label} (${engine.id})`).join(", ")}</div>
                   </>
+                ) : backendHealth ? (
+                  <div>Backend adapter detected. Switch runtime mode to use server-backed execution.</div>
                 ) : (
-                  <div>Runtime health is unavailable.</div>
+                  <div>Public mode is running local simulation only. Backend controls stay hidden until a server is reachable.</div>
                 )}
               </div>
             </div>
