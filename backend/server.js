@@ -76,12 +76,13 @@ const server = http.createServer(async (request, response) => {
   }
 
   if (request.method === "GET" && request.url === "/api/health") {
+    const engines = await listEngines();
     sendJson(response, 200, {
       ok: true,
       service: "nexus-backend",
       port: PORT,
       defaultEngine: getDefaultEngineId(),
-      engines: listEngines(),
+      engines,
     });
     return;
   }

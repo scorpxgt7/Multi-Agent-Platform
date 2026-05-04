@@ -104,3 +104,7 @@ external model provider.
   engine is active.
 - Operators can now choose the active engine from the UI and keep a lightweight
   approval gate enabled before dispatching runs.
+- An optional `ollama` engine now works through Ollama's local OpenAI-compatible
+  endpoint on `http://127.0.0.1:11434/v1`.
+- Configure the local AI engine with `OLLAMA_MODEL` and optionally
+  `OLLAMA_BASE_URL` before starting `npm run backend`.

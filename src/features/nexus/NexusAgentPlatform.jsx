@@ -184,7 +184,7 @@ export default function NexusAgentPlatform() {
       return;
     }
 
-    const engineExists = runtimeHealth.engines.some((engine) => engine.id === selectedEngine);
+    const engineExists = runtimeHealth.engines.some((engine) => engine.id === selectedEngine && engine.available !== false);
     if (!engineExists) {
       setSelectedEngine(runtimeHealth.defaultEngine);
     }
@@ -308,6 +308,7 @@ export default function NexusAgentPlatform() {
   const availableRuntimeOptions = backendHealth
     ? RUNTIME_OPTIONS
     : RUNTIME_OPTIONS.filter((option) => option.value !== "backend");
+  const availableBackendEngines = (runtimeHealth?.engines || []).filter((engine) => engine.available !== false);
   const openSavedSession = async (session) => {
     setTask(session.task);
     setFinalOutput(session.finalOutput);
@@ -422,10 +423,10 @@ export default function NexusAgentPlatform() {
                 <select
                   value={selectedEngine}
                   onChange={(event) => setSelectedEngine(event.target.value)}
-                  disabled={running || !runtimeHealth?.engines?.length}
+                  disabled={running || !availableBackendEngines.length}
                   style={{ width: "100%", background: "#0b0e15", border: "1px solid #1a2530", borderRadius: 4, color: "#8fa0b0", padding: "9px 11px", fontFamily: "'Share Tech Mono',monospace", fontSize: 10 }}
                 >
-                  {(runtimeHealth?.engines || []).map((engine) => (
+                  {availableBackendEngines.map((engine) => (
                     <option key={engine.id} value={engine.id}>{engine.label}</option>
                   ))}
                 </select>
@@ -467,7 +468,7 @@ export default function NexusAgentPlatform() {
                     <div>Service: {runtimeHealth.service}</div>
                     <div>Default engine: {runtimeHealth.defaultEngine}</div>
                     <div>Selected engine: {selectedEngine}</div>
-                    <div>Engines: {runtimeHealth.engines.map((engine) => `${engine.label} (${engine.id})`).join(", ")}</div>
+                    <div>Available engines: {availableBackendEngines.length ? availableBackendEngines.map((engine) => `${engine.label} (${engine.id})`).join(", ") : "None detected"}</div>
                   </>
                 ) : backendHealth ? (
                   <div>Backend adapter detected. Switch runtime mode to use server-backed execution.</div>
