@@ -16,6 +16,15 @@ function createApiUrl(path, baseUrl = "") {
   return normalizedBaseUrl ? `${normalizedBaseUrl}${path}` : `/api${path}`;
 }
 
+function createApiHeaders(apiKey = "", baseHeaders = {}) {
+  const headers = { ...baseHeaders };
+  const trimmedApiKey = typeof apiKey === "string" ? apiKey.trim() : "";
+  if (trimmedApiKey) {
+    headers["X-Nexus-Api-Key"] = trimmedApiKey;
+  }
+  return headers;
+}
+
 async function readApiError(response, fallbackMessage) {
   try {
     const payload = await response.json();
@@ -34,12 +43,12 @@ async function readApiError(response, fallbackMessage) {
   }
 }
 
-export async function runBackendPipeline({ task, agents, engine = "local-simulation", baseUrl = "" }) {
+export async function runBackendPipeline({ task, agents, engine = "local-simulation", baseUrl = "", apiKey = "" }) {
   const response = await fetch(createApiUrl("/nexus/run", baseUrl), {
     method: "POST",
-    headers: {
+    headers: createApiHeaders(apiKey, {
       "Content-Type": "application/json",
-    },
+    }),
     body: JSON.stringify({ task, agents, engine }),
   });
 
@@ -55,8 +64,10 @@ export async function runBackendPipeline({ task, agents, engine = "local-simulat
   return payload;
 }
 
-export async function fetchBackendHealth(baseUrl = "") {
-  const response = await fetch(createApiUrl("/health", baseUrl));
+export async function fetchBackendHealth(baseUrl = "", apiKey = "") {
+  const response = await fetch(createApiUrl("/health", baseUrl), {
+    headers: createApiHeaders(apiKey),
+  });
 
   if (!response.ok) {
     throw new Error(await readApiError(response, `Backend health request failed with status ${response.status}`));
@@ -70,8 +81,10 @@ export async function fetchBackendHealth(baseUrl = "") {
   return payload;
 }
 
-export async function fetchBackendRuns(baseUrl = "") {
-  const response = await fetch(createApiUrl("/nexus/runs", baseUrl));
+export async function fetchBackendRuns(baseUrl = "", apiKey = "") {
+  const response = await fetch(createApiUrl("/nexus/runs", baseUrl), {
+    headers: createApiHeaders(apiKey),
+  });
 
   if (!response.ok) {
     throw new Error(await readApiError(response, `Backend runs request failed with status ${response.status}`));
@@ -85,8 +98,10 @@ export async function fetchBackendRuns(baseUrl = "") {
   return payload.runs;
 }
 
-export async function fetchBackendRunDetail(runId, baseUrl = "") {
-  const response = await fetch(createApiUrl(`/nexus/runs/${runId}`, baseUrl));
+export async function fetchBackendRunDetail(runId, baseUrl = "", apiKey = "") {
+  const response = await fetch(createApiUrl(`/nexus/runs/${runId}`, baseUrl), {
+    headers: createApiHeaders(apiKey),
+  });
 
   if (!response.ok) {
     throw new Error(await readApiError(response, `Backend run detail request failed with status ${response.status}`));
@@ -100,8 +115,10 @@ export async function fetchBackendRunDetail(runId, baseUrl = "") {
   return payload.run;
 }
 
-export async function fetchBackendDiagnosticsSummary(baseUrl = "") {
-  const response = await fetch(createApiUrl("/diagnostics/summary", baseUrl));
+export async function fetchBackendDiagnosticsSummary(baseUrl = "", apiKey = "") {
+  const response = await fetch(createApiUrl("/diagnostics/summary", baseUrl), {
+    headers: createApiHeaders(apiKey),
+  });
 
   if (!response.ok) {
     throw new Error(await readApiError(response, `Backend diagnostics request failed with status ${response.status}`));
@@ -115,8 +132,10 @@ export async function fetchBackendDiagnosticsSummary(baseUrl = "") {
   return payload.diagnostics;
 }
 
-export async function fetchBackendMaintenanceStatus(baseUrl = "") {
-  const response = await fetch(createApiUrl("/maintenance/status", baseUrl));
+export async function fetchBackendMaintenanceStatus(baseUrl = "", apiKey = "") {
+  const response = await fetch(createApiUrl("/maintenance/status", baseUrl), {
+    headers: createApiHeaders(apiKey),
+  });
 
   if (!response.ok) {
     throw new Error(await readApiError(response, `Backend maintenance status request failed with status ${response.status}`));
@@ -130,8 +149,10 @@ export async function fetchBackendMaintenanceStatus(baseUrl = "") {
   return payload.maintenance;
 }
 
-export async function fetchBackendMaintenanceReviews(baseUrl = "", limit = 5) {
-  const response = await fetch(createApiUrl(`/maintenance/reviews?limit=${limit}`, baseUrl));
+export async function fetchBackendMaintenanceReviews(baseUrl = "", limit = 5, apiKey = "") {
+  const response = await fetch(createApiUrl(`/maintenance/reviews?limit=${limit}`, baseUrl), {
+    headers: createApiHeaders(apiKey),
+  });
 
   if (!response.ok) {
     throw new Error(await readApiError(response, `Backend maintenance reviews request failed with status ${response.status}`));
@@ -145,9 +166,10 @@ export async function fetchBackendMaintenanceReviews(baseUrl = "", limit = 5) {
   return payload.reviews;
 }
 
-export async function runBackendMaintenanceReview(baseUrl = "") {
+export async function runBackendMaintenanceReview(baseUrl = "", apiKey = "") {
   const response = await fetch(createApiUrl("/maintenance/run", baseUrl), {
     method: "POST",
+    headers: createApiHeaders(apiKey),
   });
 
   if (!response.ok) {

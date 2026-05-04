@@ -16,7 +16,7 @@ export async function runPipelineWithRuntime(runtimeMode, payload) {
 
 export async function fetchRunsForRuntime(runtimeMode, options = {}) {
   if (runtimeMode === "backend") {
-    return fetchBackendRuns(options.baseUrl);
+    return fetchBackendRuns(options.baseUrl, options.apiKey);
   }
 
   return [];
@@ -24,7 +24,7 @@ export async function fetchRunsForRuntime(runtimeMode, options = {}) {
 
 export async function fetchRunDetailForRuntime(runtimeMode, runId, options = {}) {
   if (runtimeMode === "backend") {
-    return fetchBackendRunDetail(runId, options.baseUrl);
+    return fetchBackendRunDetail(runId, options.baseUrl, options.apiKey);
   }
 
   return null;
@@ -32,7 +32,7 @@ export async function fetchRunDetailForRuntime(runtimeMode, runId, options = {})
 
 export async function fetchRuntimeHealth(runtimeMode, options = {}) {
   if (runtimeMode === "backend") {
-    return fetchBackendHealth(options.baseUrl);
+    return fetchBackendHealth(options.baseUrl, options.apiKey);
   }
 
   return {
@@ -58,7 +58,7 @@ export async function probeBackendRuntime(baseUrl = "") {
 
 export async function fetchDiagnosticsForRuntime(runtimeMode, options = {}) {
   if (runtimeMode === "backend") {
-    return fetchBackendDiagnosticsSummary(options.baseUrl);
+    return fetchBackendDiagnosticsSummary(options.baseUrl, options.apiKey);
   }
 
   return null;
@@ -66,7 +66,7 @@ export async function fetchDiagnosticsForRuntime(runtimeMode, options = {}) {
 
 export async function fetchMaintenanceForRuntime(runtimeMode, options = {}) {
   if (runtimeMode === "backend") {
-    return fetchBackendMaintenanceStatus(options.baseUrl);
+    return fetchBackendMaintenanceStatus(options.baseUrl, options.apiKey);
   }
 
   return null;
@@ -74,7 +74,7 @@ export async function fetchMaintenanceForRuntime(runtimeMode, options = {}) {
 
 export async function runMaintenanceForRuntime(runtimeMode, options = {}) {
   if (runtimeMode === "backend") {
-    return runBackendMaintenanceReview(options.baseUrl);
+    return runBackendMaintenanceReview(options.baseUrl, options.apiKey);
   }
 
   return null;
@@ -82,7 +82,7 @@ export async function runMaintenanceForRuntime(runtimeMode, options = {}) {
 
 export async function fetchMaintenanceReviewsForRuntime(runtimeMode, options = {}) {
   if (runtimeMode === "backend") {
-    return fetchBackendMaintenanceReviews(options.baseUrl, options.limit);
+    return fetchBackendMaintenanceReviews(options.baseUrl, options.limit, options.apiKey);
   }
 
   return [];

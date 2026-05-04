@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { AGENT_COLORS, DEFAULT_AGENTS, EMPTY_STATUSES, STATUS_COLOR, TASK_PRESETS } from "./data.js";
 import { RUNTIME_OPTIONS, fetchDiagnosticsForRuntime, fetchMaintenanceForRuntime, fetchMaintenanceReviewsForRuntime, fetchRunDetailForRuntime, fetchRunsForRuntime, fetchRuntimeHealth, probeBackendRuntime, runMaintenanceForRuntime, runPipelineWithRuntime } from "./runtime/client.js";
-import { loadApprovalGate, loadBackendBaseUrl, loadRuntimeMode, loadSelectedEngine, loadSessionHistory, saveApprovalGate, saveBackendBaseUrl, saveRuntimeMode, saveSelectedEngine, saveSessionHistory } from "./storage.js";
+import { loadApprovalGate, loadBackendApiKey, loadBackendBaseUrl, loadRuntimeMode, loadSelectedEngine, loadSessionHistory, saveApprovalGate, saveBackendApiKey, saveBackendBaseUrl, saveRuntimeMode, saveSelectedEngine, saveSessionHistory } from "./storage.js";
 
 function AgentNode({ name, role, status, size = "sm", onClick }) {
   const color = STATUS_COLOR[status] || STATUS_COLOR.idle;
@@ -132,6 +132,7 @@ export default function NexusAgentPlatform() {
   const [selectedEngine, setSelectedEngine] = useState(() => loadSelectedEngine());
   const [approvalRequired, setApprovalRequired] = useState(() => loadApprovalGate());
   const [backendBaseUrl, setBackendBaseUrl] = useState(() => loadBackendBaseUrl());
+  const [backendApiKey, setBackendApiKey] = useState(() => loadBackendApiKey());
   const [runtimeHealth, setRuntimeHealth] = useState(null);
   const [backendHealth, setBackendHealth] = useState(null);
   const [diagnosticsSummary, setDiagnosticsSummary] = useState(null);
@@ -176,13 +177,17 @@ export default function NexusAgentPlatform() {
   }, [backendBaseUrl]);
 
   useEffect(() => {
+    saveBackendApiKey(backendApiKey);
+  }, [backendApiKey]);
+
+  useEffect(() => {
     saveSessionHistory(sessionHistory);
   }, [sessionHistory]);
 
   useEffect(() => {
     let isActive = true;
 
-    fetchRuntimeHealth(runtimeMode, { baseUrl: backendBaseUrl })
+    fetchRuntimeHealth(runtimeMode, { baseUrl: backendBaseUrl, apiKey: backendApiKey })
       .then((health) => {
         if (isActive) {
           setRuntimeHealth(health);
@@ -197,7 +202,7 @@ export default function NexusAgentPlatform() {
     return () => {
       isActive = false;
     };
-  }, [runtimeMode, backendBaseUrl]);
+  }, [runtimeMode, backendBaseUrl, backendApiKey]);
 
   useEffect(() => {
     let isActive = true;
@@ -245,7 +250,7 @@ export default function NexusAgentPlatform() {
       };
     }
 
-    fetchDiagnosticsForRuntime("backend", { baseUrl: backendBaseUrl })
+    fetchDiagnosticsForRuntime("backend", { baseUrl: backendBaseUrl, apiKey: backendApiKey })
       .then((diagnostics) => {
         if (isActive) {
           setDiagnosticsSummary(diagnostics);
@@ -260,7 +265,7 @@ export default function NexusAgentPlatform() {
     return () => {
       isActive = false;
     };
-  }, [runtimeMode, backendHealth, backendBaseUrl]);
+  }, [runtimeMode, backendHealth, backendBaseUrl, backendApiKey]);
 
   useEffect(() => {
     let isActive = true;
@@ -274,8 +279,8 @@ export default function NexusAgentPlatform() {
     }
 
     Promise.all([
-      fetchMaintenanceForRuntime("backend", { baseUrl: backendBaseUrl }),
-      fetchMaintenanceReviewsForRuntime("backend", { baseUrl: backendBaseUrl, limit: 4 }),
+      fetchMaintenanceForRuntime("backend", { baseUrl: backendBaseUrl, apiKey: backendApiKey }),
+      fetchMaintenanceReviewsForRuntime("backend", { baseUrl: backendBaseUrl, limit: 4, apiKey: backendApiKey }),
     ])
       .then(([maintenance, reviews]) => {
         if (isActive) {
@@ -293,7 +298,7 @@ export default function NexusAgentPlatform() {
     return () => {
       isActive = false;
     };
-  }, [runtimeMode, backendHealth, backendBaseUrl]);
+  }, [runtimeMode, backendHealth, backendBaseUrl, backendApiKey]);
 
   useEffect(() => {
     let isActive = true;
@@ -305,7 +310,7 @@ export default function NexusAgentPlatform() {
       };
     }
 
-    fetchRunsForRuntime("backend", { baseUrl: backendBaseUrl })
+    fetchRunsForRuntime("backend", { baseUrl: backendBaseUrl, apiKey: backendApiKey })
       .then((runs) => {
         if (isActive) {
           setBackendRuns(runs);
@@ -320,7 +325,7 @@ export default function NexusAgentPlatform() {
     return () => {
       isActive = false;
     };
-  }, [runtimeMode, backendHealth, backendBaseUrl]);
+  }, [runtimeMode, backendHealth, backendBaseUrl, backendApiKey]);
 
   const setStatus = useCallback((id, status) => {
     setStatuses((previous) => ({ ...previous, [id]: status }));
@@ -374,7 +379,7 @@ export default function NexusAgentPlatform() {
     const startedAt = new Date().toISOString();
 
     try {
-      const result = await runPipelineWithRuntime(runtimeMode, { task, agents: activeAgents, engine: selectedEngine, baseUrl: backendBaseUrl });
+      const result = await runPipelineWithRuntime(runtimeMode, { task, agents: activeAgents, engine: selectedEngine, baseUrl: backendBaseUrl, apiKey: backendApiKey });
       const completedAt = new Date().toISOString();
       result.statuses.forEach((entry) => {
         setStatus(entry.id, entry.status);
@@ -404,7 +409,7 @@ export default function NexusAgentPlatform() {
         ...previous,
       ]);
       if (runtimeMode === "backend") {
-        const runs = await fetchRunsForRuntime("backend", { baseUrl: backendBaseUrl });
+        const runs = await fetchRunsForRuntime("backend", { baseUrl: backendBaseUrl, apiKey: backendApiKey });
         setBackendRuns(runs);
       }
       setSelectedRunMeta({
@@ -490,7 +495,7 @@ export default function NexusAgentPlatform() {
     }
 
     try {
-      const detail = await fetchRunDetailForRuntime("backend", session.id, { baseUrl: backendBaseUrl });
+      const detail = await fetchRunDetailForRuntime("backend", session.id, { baseUrl: backendBaseUrl, apiKey: backendApiKey });
       setLog(detail.entries || []);
       setSelectedRunArtifacts(detail.artifacts || []);
       setSelectedRunMeta({
@@ -520,12 +525,12 @@ export default function NexusAgentPlatform() {
 
     setMaintenanceRunning(true);
     try {
-      await runMaintenanceForRuntime("backend", { baseUrl: backendBaseUrl });
+      await runMaintenanceForRuntime("backend", { baseUrl: backendBaseUrl, apiKey: backendApiKey });
       const [diagnostics, maintenance, reviews, health] = await Promise.all([
-        fetchDiagnosticsForRuntime("backend", { baseUrl: backendBaseUrl }),
-        fetchMaintenanceForRuntime("backend", { baseUrl: backendBaseUrl }),
-        fetchMaintenanceReviewsForRuntime("backend", { baseUrl: backendBaseUrl, limit: 4 }),
-        fetchRuntimeHealth("backend", { baseUrl: backendBaseUrl }),
+        fetchDiagnosticsForRuntime("backend", { baseUrl: backendBaseUrl, apiKey: backendApiKey }),
+        fetchMaintenanceForRuntime("backend", { baseUrl: backendBaseUrl, apiKey: backendApiKey }),
+        fetchMaintenanceReviewsForRuntime("backend", { baseUrl: backendBaseUrl, limit: 4, apiKey: backendApiKey }),
+        fetchRuntimeHealth("backend", { baseUrl: backendBaseUrl, apiKey: backendApiKey }),
       ]);
       setDiagnosticsSummary(diagnostics);
       setMaintenanceStatus(maintenance);
@@ -647,6 +652,16 @@ export default function NexusAgentPlatform() {
                 style={{ width: "100%", background: "#0b0e15", border: "1px solid #1a2530", borderRadius: 4, color: "#8fa0b0", padding: "9px 11px", fontFamily: "'Share Tech Mono',monospace", fontSize: 10, outline: "none" }}
               />
             </div>
+            <div>
+              <div style={{ fontFamily: "'Share Tech Mono',monospace", fontSize: 8, color: "#2e3d4d", letterSpacing: "0.15em", textTransform: "uppercase", marginBottom: 6 }}>Backend API Key</div>
+              <input
+                value={backendApiKey}
+                onChange={(event) => setBackendApiKey(event.target.value)}
+                disabled={running}
+                placeholder="Optional key for protected backend access"
+                style={{ width: "100%", background: "#0b0e15", border: "1px solid #1a2530", borderRadius: 4, color: "#8fa0b0", padding: "9px 11px", fontFamily: "'Share Tech Mono',monospace", fontSize: 10, outline: "none" }}
+              />
+            </div>
             <label style={{ display: "flex", alignItems: "center", gap: 8, padding: "10px", background: "#0c1018", border: "1px solid #141c28", borderRadius: 4, cursor: "pointer" }}>
               <input type="checkbox" checked={approvalRequired} onChange={(event) => setApprovalRequired(event.target.checked)} disabled={running} />
               <span style={{ fontFamily: "'Share Tech Mono',monospace", fontSize: 9, color: "#8fa0b0", lineHeight: 1.5 }}>
@@ -689,6 +704,8 @@ export default function NexusAgentPlatform() {
                   <>
                     <div>Service: {runtimeHealth.service}</div>
                     <div>Endpoint: {backendBaseUrl.trim() || "same-origin /api"}</div>
+                    <div>Auth required: {runtimeHealth.authRequired ? "yes" : "no"}</div>
+                    <div>Authenticated: {runtimeHealth.authRequired ? (runtimeHealth.authenticated ? "yes" : "no") : "not required"}</div>
                     <div>Host: {runtimeHealth.host || "n/a"}:{runtimeHealth.port || "n/a"}</div>
                     <div>Default engine: {runtimeHealth.defaultEngine}</div>
                     <div>Selected engine: {selectedEngine}</div>

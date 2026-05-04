@@ -12,6 +12,28 @@ const CONFIG = loadConfig();
 const SERVER_STARTED_AT = Date.now();
 let lastPersistenceErrorMessage = "";
 
+function extractApiKey(request) {
+  const headerToken = request.headers["x-nexus-api-key"];
+  if (typeof headerToken === "string" && headerToken.trim()) {
+    return headerToken.trim();
+  }
+
+  const authHeader = request.headers.authorization;
+  if (typeof authHeader === "string" && authHeader.toLowerCase().startsWith("bearer ")) {
+    return authHeader.slice(7).trim();
+  }
+
+  return "";
+}
+
+function isAuthenticated(request) {
+  if (!CONFIG.authEnabled) {
+    return true;
+  }
+
+  return extractApiKey(request) === CONFIG.apiKey;
+}
+
 function collectJson(request) {
   return new Promise((resolve, reject) => {
     let body = "";
@@ -51,6 +73,7 @@ const server = http.createServer(async (request, response) => {
 
   if (request.method === "GET" && request.url === "/api/health") {
     try {
+      const authenticated = isAuthenticated(request);
       const engines = await listEngines();
       const persistence = await getPersistenceHealth();
       const configAdvisories = getConfigAdvisories(CONFIG);
@@ -69,8 +92,21 @@ const server = http.createServer(async (request, response) => {
         });
       }
       const diagnostics = await getDiagnosticSummary();
+      if (!authenticated && CONFIG.authEnabled) {
+        sendApiSuccess(response, 200, {
+          service: "nexus-backend",
+          authRequired: true,
+          authenticated: false,
+          defaultEngine: getDefaultEngineId(),
+          engines,
+          timestamp: new Date().toISOString(),
+        }, corsHeaders);
+        return;
+      }
       sendApiSuccess(response, 200, {
         service: "nexus-backend",
+        authRequired: CONFIG.authEnabled,
+        authenticated,
         host: CONFIG.host,
         port: CONFIG.port,
         defaultEngine: getDefaultEngineId(),
@@ -92,6 +128,11 @@ const server = http.createServer(async (request, response) => {
       sendApiError(response, error, corsHeaders);
       return;
     }
+  }
+
+  if (!isAuthenticated(request)) {
+    sendApiError(response, new ApiError(401, "unauthorized", "Valid backend API credentials are required for this operation."), corsHeaders);
+    return;
   }
 
   if (request.method === "GET" && request.url === "/api/nexus/runs") {

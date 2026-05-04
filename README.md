@@ -140,6 +140,8 @@ external model provider.
   backend separately with `HOST`, `PORT`, and optional Ollama environment
   variables from `backend/.env.example`.
 - Set `CORS_ALLOWED_ORIGINS` to an explicit allowlist before public deployment.
+- Set `NEXUS_API_KEY` before public deployment if backend operations should be
+  protected from anonymous access.
 - `GET /api/health` now reports deployment diagnostics such as host, port,
   persistence mode, uptime, public app URL, and CORS mode so the frontend can
   verify a remote backend configuration.
@@ -161,5 +163,7 @@ external model provider.
 - Maintenance reviews now generate structured remediation suggestions, but they
   remain operator-approved recommendations rather than automatic backend or code
   changes.
+- The frontend can now store an optional backend API key locally so protected
+  backend environments can still be operated from the same shell.
 - This is the groundwork for a future scheduled reviewer system, but no
   autonomous fixer is enabled yet.

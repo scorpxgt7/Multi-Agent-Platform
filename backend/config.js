@@ -56,6 +56,10 @@ function normalizeDailyUtc(value) {
   return `${hourText}:${minuteText}`;
 }
 
+function normalizeApiKey(value) {
+  return typeof value === "string" && value.trim() ? value.trim() : "";
+}
+
 export function loadConfig() {
   const host = normalizeHost(process.env.HOST);
   const port = normalizePort(process.env.PORT);
@@ -67,6 +71,7 @@ export function loadConfig() {
   const maintenanceEnabled = normalizeBoolean(process.env.MAINTENANCE_AUTORUN, false);
   const maintenanceIntervalMinutes = normalizePositiveInteger(process.env.MAINTENANCE_INTERVAL_MINUTES, 1440);
   const maintenanceDailyUtc = normalizeDailyUtc(process.env.MAINTENANCE_DAILY_UTC);
+  const apiKey = normalizeApiKey(process.env.NEXUS_API_KEY);
 
   return {
     host,
@@ -78,6 +83,8 @@ export function loadConfig() {
     maintenanceEnabled,
     maintenanceIntervalMinutes,
     maintenanceDailyUtc,
+    apiKey,
+    authEnabled: Boolean(apiKey),
   };
 }
 
@@ -105,6 +112,14 @@ export function getConfigAdvisories(config) {
       level: "warn",
       key: "maintenance_schedule_missing",
       message: "Maintenance auto-run is enabled without a usable schedule.",
+    });
+  }
+
+  if (!config.authEnabled && config.publicAppUrl) {
+    advisories.push({
+      level: "warn",
+      key: "auth_disabled_public",
+      message: "Backend API auth is disabled while a public app URL is configured.",
     });
   }
 

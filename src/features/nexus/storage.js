@@ -4,6 +4,7 @@ const STORAGE_KEYS = {
   sessionHistory: "nexus.sessionHistory",
   approvalGate: "nexus.approvalGate",
   backendBaseUrl: "nexus.backendBaseUrl",
+  backendApiKey: "nexus.backendApiKey",
 };
 
 function readJson(key, fallback) {
@@ -61,4 +62,12 @@ export function loadBackendBaseUrl() {
 
 export function saveBackendBaseUrl(value) {
   writeJson(STORAGE_KEYS.backendBaseUrl, value);
+}
+
+export function loadBackendApiKey() {
+  return readJson(STORAGE_KEYS.backendApiKey, "");
+}
+
+export function saveBackendApiKey(value) {
+  writeJson(STORAGE_KEYS.backendApiKey, value);
 }
