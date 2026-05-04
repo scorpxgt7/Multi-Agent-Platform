@@ -60,6 +60,15 @@ function normalizeApiKey(value) {
   return typeof value === "string" && value.trim() ? value.trim() : "";
 }
 
+function isValidUrl(value) {
+  try {
+    const parsed = new URL(value);
+    return parsed.protocol === "http:" || parsed.protocol === "https:";
+  } catch {
+    return false;
+  }
+}
+
 export function loadConfig() {
   const host = normalizeHost(process.env.HOST);
   const port = normalizePort(process.env.PORT);
@@ -146,5 +155,42 @@ export function createCorsHeaders(origin, allowedOrigins) {
     "Access-Control-Allow-Headers": "Content-Type",
     "Access-Control-Allow-Methods": "GET,POST,OPTIONS",
     Vary: "Origin",
+  };
+}
+
+export function validateConfig(config) {
+  const errors = [];
+  const warnings = [];
+
+  if (!Number.isInteger(config.port) || config.port <= 0) {
+    errors.push("PORT must be a positive integer.");
+  }
+
+  if (config.publicAppUrl && !isValidUrl(config.publicAppUrl)) {
+    errors.push("PUBLIC_APP_URL must be a valid http or https URL.");
+  }
+
+  for (const origin of config.allowedOrigins) {
+    if (origin !== "*" && !isValidUrl(origin)) {
+      errors.push(`CORS_ALLOWED_ORIGINS contains an invalid origin: ${origin}`);
+    }
+  }
+
+  if (config.authEnabled && config.apiKey.length < 12) {
+    warnings.push("NEXUS_API_KEY is set but shorter than 12 characters.");
+  }
+
+  if (!config.authEnabled && config.publicAppUrl) {
+    warnings.push("Backend auth is disabled while PUBLIC_APP_URL is configured.");
+  }
+
+  if (config.allowedOrigins.includes("*") && config.publicAppUrl) {
+    warnings.push("CORS is configured as wildcard while PUBLIC_APP_URL is configured.");
+  }
+
+  return {
+    ok: errors.length === 0,
+    errors,
+    warnings,
   };
 }

@@ -37,6 +37,10 @@ external model provider.
    `npm run backend`
 4. Build for production:
    `npm run build`
+5. Validate backend startup config without serving traffic:
+   `npm run validate:backend`
+6. Run the backend smoke check against a live backend:
+   `npm run smoke:backend`
 
 ## Phase 3 notes
 
@@ -145,6 +149,10 @@ external model provider.
 - `GET /api/health` now reports deployment diagnostics such as host, port,
   persistence mode, uptime, public app URL, and CORS mode so the frontend can
   verify a remote backend configuration.
+- `npm run validate:backend` now fails fast on invalid startup config and reports
+  warnings without opening a listener.
+- `npm run smoke:backend` checks live backend health plus protected maintenance
+  access against a running backend instance.
 
 ## Observability groundwork
 

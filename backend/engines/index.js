@@ -23,6 +23,10 @@ export function getEngine(engineId) {
   return ENGINE_REGISTRY[engineId] || localEngine;
 }
 
+export function hasEngine(engineId) {
+  return Boolean(ENGINE_REGISTRY[engineId]);
+}
+
 export function getDefaultEngineId() {
   return loadConfig().defaultEngine || localEngine.id;
 }

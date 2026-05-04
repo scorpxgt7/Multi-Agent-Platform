@@ -1,9 +1,9 @@
 import http from "node:http";
 import crypto from "node:crypto";
-import { createCorsHeaders, getConfigAdvisories, isOriginAllowed, loadConfig } from "./config.js";
+import { createCorsHeaders, getConfigAdvisories, isOriginAllowed, loadConfig, validateConfig } from "./config.js";
 import { getDiagnosticSummary, listDiagnosticEvents, recordDiagnosticEvent } from "./diagnosticsStorage.js";
 import { ApiError, sendApiError, sendApiSuccess } from "./errors.js";
-import { getDefaultEngineId, getEngine, listEngines } from "./engines/index.js";
+import { getDefaultEngineId, getEngine, hasEngine, listEngines } from "./engines/index.js";
 import { getMaintenanceReviews, getMaintenanceStatus, initializeMaintenanceScheduler, runMaintenanceReview } from "./maintenanceRunner.js";
 import { getPersistenceHealth, getRunDetail, listRunSummaries, saveRunRecord } from "./storage.js";
 import { validateRunPayload } from "./validators.js";
@@ -11,6 +11,39 @@ import { validateRunPayload } from "./validators.js";
 const CONFIG = loadConfig();
 const SERVER_STARTED_AT = Date.now();
 let lastPersistenceErrorMessage = "";
+const VALIDATE_ONLY = process.argv.includes("--validate");
+const STARTUP_VALIDATION = validateConfig(CONFIG);
+
+if (!hasEngine(CONFIG.defaultEngine)) {
+  STARTUP_VALIDATION.ok = false;
+  STARTUP_VALIDATION.errors.push(`NEXUS_ENGINE "${CONFIG.defaultEngine}" is not registered.`);
+}
+
+if (!STARTUP_VALIDATION.ok) {
+  console.error("Backend startup validation failed:");
+  STARTUP_VALIDATION.errors.forEach((error) => console.error(`- ${error}`));
+  process.exit(1);
+}
+
+if (STARTUP_VALIDATION.warnings.length > 0) {
+  console.warn("Backend startup warnings:");
+  STARTUP_VALIDATION.warnings.forEach((warning) => console.warn(`- ${warning}`));
+}
+
+if (VALIDATE_ONLY) {
+  console.log(JSON.stringify({
+    ok: true,
+    config: {
+      host: CONFIG.host,
+      port: CONFIG.port,
+      publicAppUrl: CONFIG.publicAppUrl || null,
+      authEnabled: CONFIG.authEnabled,
+      defaultEngine: CONFIG.defaultEngine,
+    },
+    warnings: STARTUP_VALIDATION.warnings,
+  }));
+  process.exit(0);
+}
 
 function extractApiKey(request) {
   const headerToken = request.headers["x-nexus-api-key"];
@@ -120,6 +153,10 @@ const server = http.createServer(async (request, response) => {
           allowedOrigins: CONFIG.allowedOrigins,
           corsMode: CONFIG.allowedOrigins.includes("*") ? "wildcard" : "allowlist",
           configAdvisories,
+          startupValidation: {
+            ok: STARTUP_VALIDATION.ok,
+            warnings: STARTUP_VALIDATION.warnings,
+          },
         },
         diagnostics,
       }, corsHeaders);
