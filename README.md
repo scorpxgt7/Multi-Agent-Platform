@@ -10,6 +10,8 @@ external model provider.
   Root bootstrap page for local development and legacy GitHub Pages root hosting.
 - `app.html`
   Dedicated Vite build entry that compiles the React app into deployable HTML.
+- `assets/`
+  Committed public bundle used by the live GitHub Pages site.
 - `src/features/nexus/NexusAgentPlatform.jsx`
   Canonical platform shell used by the app.
 - `src/features/nexus/runtime/localRuntime.js`
