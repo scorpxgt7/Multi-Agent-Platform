@@ -8,6 +8,8 @@
     "backend": "node backend/server.js",
     "validate:backend": "node backend/server.js --validate",
     "smoke:backend": "node backend/smoke_check.js",
+    "smoke:frontend": "node scripts/smoke-frontend.mjs",
+    "smoke:release": "npm run build && npm run smoke:frontend",
     "build": "vite build && node scripts/write-build-index.mjs dist && node scripts/sync-root-assets.mjs dist/assets assets",
     "preview": "vite preview"
   },

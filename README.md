@@ -41,6 +41,10 @@ external model provider.
    `npm run validate:backend`
 6. Run the backend smoke check against a live backend:
    `npm run smoke:backend`
+7. Run the frontend browser smoke check against the built app:
+   `npm run smoke:frontend`
+8. Run the release smoke path:
+   `npm run smoke:release`
 
 ## Deployment packaging
 
@@ -172,8 +176,17 @@ external model provider.
   warnings without opening a listener.
 - `npm run smoke:backend` checks live backend health plus protected maintenance
   access against a running backend instance.
+- `npm run smoke:frontend` uses local Microsoft Edge headlessly against the
+  built app and verifies that the main operator panels render after JavaScript
+  execution.
+- `npm run smoke:release` combines the production build with the frontend smoke
+  path for a lightweight release-level verification loop.
 - The repo now includes backend container packaging and a sample Compose file for
   repeatable deployment.
+- [ADMIN_SUBSYSTEM_STRATEGY.md](D:/Multi-Agent%20Platform/ADMIN_SUBSYSTEM_STRATEGY.md)
+  defines the practical route for adding a future Admin subsystem with finance,
+  marketing, sales, legal, and similar business-facing agents without
+  destabilizing the current five-agent mission pipeline.
 
 ## Observability groundwork
 
@@ -205,4 +218,5 @@ external model provider.
 4. Set `NEXUS_PERSISTENCE_MODE=sqlite` for strict deployments.
 5. Run `npm run validate:backend`.
 6. Start the backend and run `npm run smoke:backend`.
-7. Confirm `/api/health` reports the expected auth, persistence, and deployment diagnostics.
+7. Run `npm run smoke:frontend`.
+8. Confirm `/api/health` reports the expected auth, persistence, and deployment diagnostics.
