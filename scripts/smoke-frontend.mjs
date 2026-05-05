@@ -6,10 +6,10 @@ import path from "node:path";
 const rootDir = path.resolve(".");
 const distDir = path.resolve(rootDir, "dist");
 const host = "127.0.0.1";
-const port = Number(process.env.FRONTEND_SMOKE_PORT || 4174);
-const smokeBaseUrl = typeof process.env.FRONTEND_SMOKE_URL === "string" && process.env.FRONTEND_SMOKE_URL.trim()
+const preferredPort = Number(process.env.FRONTEND_SMOKE_PORT || 0);
+const configuredSmokeUrl = typeof process.env.FRONTEND_SMOKE_URL === "string" && process.env.FRONTEND_SMOKE_URL.trim()
   ? process.env.FRONTEND_SMOKE_URL.trim().replace(/\/+$/, "")
-  : `http://${host}:${port}`;
+  : "";
 
 const requiredMarkers = [
   "Workflow Mode",
@@ -75,7 +75,7 @@ async function serveDist() {
     });
 
     server.on("error", reject);
-    server.listen(port, host, () => resolve(server));
+    server.listen(preferredPort, host, () => resolve(server));
   });
 }
 
@@ -126,8 +126,15 @@ function assertMarkers(dom) {
 let server = null;
 
 try {
-  if (!process.env.FRONTEND_SMOKE_URL) {
+  let smokeBaseUrl = configuredSmokeUrl;
+
+  if (!configuredSmokeUrl) {
     server = await serveDist();
+    const address = server.address();
+    if (!address || typeof address === "string") {
+      throw new Error("Frontend smoke server did not expose a usable local address.");
+    }
+    smokeBaseUrl = `http://${host}:${address.port}`;
   }
 
   const edgePath = await resolveEdgePath();

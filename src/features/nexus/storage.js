@@ -1,4 +1,5 @@
 const STORAGE_KEYS = {
+  selectedSubsystem: "nexus.selectedSubsystem",
   runtimeMode: "nexus.runtimeMode",
   selectedEngine: "nexus.selectedEngine",
   sessionHistory: "nexus.sessionHistory",
@@ -26,6 +27,14 @@ function writeJson(key, value) {
 
 export function loadRuntimeMode() {
   return readJson(STORAGE_KEYS.runtimeMode, "local");
+}
+
+export function loadSelectedSubsystem() {
+  return readJson(STORAGE_KEYS.selectedSubsystem, "mission");
+}
+
+export function saveSelectedSubsystem(subsystemId) {
+  writeJson(STORAGE_KEYS.selectedSubsystem, subsystemId);
 }
 
 export function saveRuntimeMode(runtimeMode) {

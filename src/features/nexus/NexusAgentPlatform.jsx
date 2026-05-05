@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
-import { AGENT_COLORS, DEFAULT_AGENTS, EMPTY_STATUSES, STATUS_COLOR, TASK_PRESETS } from "./data.js";
+import { AGENT_COLORS, STATUS_COLOR, SUBSYSTEMS, buildEmptyStatuses, getSubsystemById } from "./data.js";
 import { RUNTIME_OPTIONS, fetchDiagnosticsForRuntime, fetchMaintenanceForRuntime, fetchMaintenanceReviewsForRuntime, fetchRunDetailForRuntime, fetchRunsForRuntime, fetchRuntimeHealth, probeBackendRuntime, runMaintenanceForRuntime, runPipelineWithRuntime } from "./runtime/client.js";
-import { loadApprovalGate, loadBackendApiKey, loadBackendBaseUrl, loadRuntimeMode, loadSelectedEngine, loadSessionHistory, saveApprovalGate, saveBackendApiKey, saveBackendBaseUrl, saveRuntimeMode, saveSelectedEngine, saveSessionHistory } from "./storage.js";
+import { loadApprovalGate, loadBackendApiKey, loadBackendBaseUrl, loadRuntimeMode, loadSelectedEngine, loadSelectedSubsystem, loadSessionHistory, saveApprovalGate, saveBackendApiKey, saveBackendBaseUrl, saveRuntimeMode, saveSelectedEngine, saveSelectedSubsystem, saveSessionHistory } from "./storage.js";
 
 function AgentNode({ name, role, status, size = "sm", onClick }) {
   const color = STATUS_COLOR[status] || STATUS_COLOR.idle;
@@ -118,13 +118,22 @@ function buildRunComparison(primary, secondary) {
   };
 }
 
+function cloneAgents(agentList) {
+  return agentList.map((agent) => ({
+    ...agent,
+    advancedSkills: Array.isArray(agent.advancedSkills) ? [...agent.advancedSkills] : [],
+  }));
+}
+
 export default function NexusAgentPlatform() {
-  const [selectedPresetId, setSelectedPresetId] = useState(TASK_PRESETS[0].id);
-  const [agents, setAgents] = useState(DEFAULT_AGENTS);
-  const [task, setTask] = useState(TASK_PRESETS[0].task);
+  const initialSubsystem = getSubsystemById(loadSelectedSubsystem());
+  const [selectedSubsystemId, setSelectedSubsystemId] = useState(initialSubsystem.id);
+  const [selectedPresetId, setSelectedPresetId] = useState(initialSubsystem.presets[0].id);
+  const [agents, setAgents] = useState(() => cloneAgents(initialSubsystem.agents));
+  const [task, setTask] = useState(initialSubsystem.presets[0].task);
   const [running, setRunning] = useState(false);
   const [phase, setPhase] = useState("idle");
-  const [statuses, setStatuses] = useState(EMPTY_STATUSES);
+  const [statuses, setStatuses] = useState(() => buildEmptyStatuses(initialSubsystem.agents));
   const [log, setLog] = useState([]);
   const [finalOutput, setFinalOutput] = useState("");
   const [activeTab, setActiveTab] = useState("log");
@@ -159,6 +168,10 @@ export default function NexusAgentPlatform() {
       logRef.current.scrollTop = logRef.current.scrollHeight;
     }
   }, [log]);
+
+  useEffect(() => {
+    saveSelectedSubsystem(selectedSubsystemId);
+  }, [selectedSubsystemId]);
 
   useEffect(() => {
     saveRuntimeMode(runtimeMode);
@@ -356,11 +369,27 @@ export default function NexusAgentPlatform() {
   }, []);
 
   const resetAll = useCallback(() => {
-    setStatuses(EMPTY_STATUSES);
+    setStatuses(buildEmptyStatuses(agentsRef.current));
     setLog([]);
     setFinalOutput("");
     setPhase("idle");
     setActiveTab("log");
+    setSelectedRunArtifacts([]);
+    setSelectedRunMeta(null);
+    setSelectedComparisonRunId("");
+  }, []);
+
+  const applySubsystem = useCallback((subsystemId, options = {}) => {
+    const subsystem = getSubsystemById(subsystemId);
+    const nextPreset = subsystem.presets.find((preset) => preset.id === options.presetId) || subsystem.presets[0];
+    setSelectedSubsystemId(subsystem.id);
+    setAgents(cloneAgents(subsystem.agents));
+    setStatuses(buildEmptyStatuses(subsystem.agents));
+    setSelectedPresetId(nextPreset.id);
+    setTask(typeof options.task === "string" ? options.task : nextPreset.task);
+    if (subsystem.approvalPosture === "strict") {
+      setApprovalRequired(true);
+    }
   }, []);
 
   const runPipeline = async () => {
@@ -393,6 +422,8 @@ export default function NexusAgentPlatform() {
       setSessionHistory((previous) => [
         {
           id: Date.now(),
+          subsystemId: selectedSubsystemId,
+          presetId: selectedPresetId,
           runtimeMode,
           engine: result.engine || runtimeHealth?.defaultEngine || "local-simulation",
           engineLabel: result.engineLabel || result.engine || runtimeHealth?.defaultEngine || "local-simulation",
@@ -414,6 +445,8 @@ export default function NexusAgentPlatform() {
       }
       setSelectedRunMeta({
         id: result.id || Date.now(),
+        subsystemId: selectedSubsystemId,
+        presetId: selectedPresetId,
         runtimeMode,
         engine: result.engine || runtimeHealth?.defaultEngine || "local-simulation",
         engineLabel: result.engineLabel || result.engine || runtimeHealth?.defaultEngine || "local-simulation",
@@ -429,6 +462,8 @@ export default function NexusAgentPlatform() {
       addLog("SYSTEM", `Error: ${error.message}`, "error");
       setSelectedRunMeta({
         id: null,
+        subsystemId: selectedSubsystemId,
+        presetId: selectedPresetId,
         runtimeMode,
         engine: runtimeMode === "backend" ? selectedEngine : "local-simulation",
         engineLabel: runtimeMode === "backend" ? selectedEngine : "local-simulation",
@@ -447,12 +482,15 @@ export default function NexusAgentPlatform() {
 
   const phaseLabel = phase === "complete" ? "COMPLETE" : phase === "error" ? "ERROR" : running ? "ACTIVE" : "STANDBY";
   const phaseDot = phase === "complete" ? "#10b981" : phase === "error" ? "#ef4444" : running ? "#f59e0b" : "#252f3a";
-  const visibleSessions = runtimeMode === "backend" ? backendRuns : sessionHistory;
+  const selectedSubsystem = getSubsystemById(selectedSubsystemId);
+  const visibleSessions = runtimeMode === "backend"
+    ? backendRuns.filter((session) => !session.subsystemId || session.subsystemId === selectedSubsystemId)
+    : sessionHistory.filter((session) => (session.subsystemId || "mission") === selectedSubsystemId);
   const availableRuntimeOptions = backendHealth
     ? RUNTIME_OPTIONS
     : RUNTIME_OPTIONS.filter((option) => option.value !== "backend");
   const availableBackendEngines = (runtimeHealth?.engines || []).filter((engine) => engine.available !== false);
-  const selectedPreset = TASK_PRESETS.find((preset) => preset.id === selectedPresetId) || TASK_PRESETS[0];
+  const selectedPreset = selectedSubsystem.presets.find((preset) => preset.id === selectedPresetId) || selectedSubsystem.presets[0];
   const comparisonOptions = visibleSessions.filter((session) => String(session.id) !== String(selectedRunMeta?.id));
   const comparisonTarget = comparisonOptions.find((session) => String(session.id) === String(selectedComparisonRunId))
     || comparisonOptions[0]
@@ -467,6 +505,7 @@ export default function NexusAgentPlatform() {
     )
     : null;
   const openSavedSession = async (session) => {
+    applySubsystem(session.subsystemId || "mission", { presetId: session.presetId, task: session.task });
     setTask(session.task);
     setFinalOutput(session.finalOutput);
     setActiveTab("output");
@@ -478,6 +517,8 @@ export default function NexusAgentPlatform() {
     }
     setSelectedRunMeta({
       id: session.id,
+      subsystemId: session.subsystemId || "mission",
+      presetId: session.presetId || null,
       runtimeMode: session.runtimeMode,
       engine: session.engine || null,
       engineLabel: session.engineLabel || session.engine || null,
@@ -500,6 +541,8 @@ export default function NexusAgentPlatform() {
       setSelectedRunArtifacts(detail.artifacts || []);
       setSelectedRunMeta({
         id: detail.id,
+        subsystemId: detail.subsystemId || session.subsystemId || "mission",
+        presetId: detail.presetId || session.presetId || null,
         runtimeMode: detail.runtimeMode,
         engine: detail.engine || null,
         engineLabel: detail.engineLabel || detail.engine || null,
@@ -620,6 +663,21 @@ export default function NexusAgentPlatform() {
           <div style={{ padding: "14px 14px", flex: 1, display: "flex", flexDirection: "column", gap: 10, overflow: "auto" }}>
             <div style={{ fontFamily: "'Share Tech Mono',monospace", fontSize: 8, color: "#2e3d4d", letterSpacing: "0.22em", textTransform: "uppercase" }}>Task Input</div>
             <div>
+              <div style={{ fontFamily: "'Share Tech Mono',monospace", fontSize: 8, color: "#2e3d4d", letterSpacing: "0.15em", textTransform: "uppercase", marginBottom: 6 }}>Subsystem Lane</div>
+              <select value={selectedSubsystemId} onChange={(event) => { resetAll(); applySubsystem(event.target.value); }} disabled={running} style={{ width: "100%", background: "#0b0e15", border: "1px solid #1a2530", borderRadius: 4, color: "#8fa0b0", padding: "9px 11px", fontFamily: "'Share Tech Mono',monospace", fontSize: 10 }}>
+                {SUBSYSTEMS.map((subsystem) => (
+                  <option key={subsystem.id} value={subsystem.id}>{subsystem.label}</option>
+                ))}
+              </select>
+            </div>
+            <div style={{ padding: "10px", background: "#0c1018", border: "1px solid #141c28", borderRadius: 4 }}>
+              <div style={{ fontFamily: "'Share Tech Mono',monospace", fontSize: 8, color: "#2e3d4d", letterSpacing: "0.15em", marginBottom: 6, textTransform: "uppercase" }}>Subsystem Profile</div>
+              <div style={{ fontFamily: "Rajdhani,sans-serif", fontWeight: 700, fontSize: 14, color: "#dce8f0", marginBottom: 4 }}>{selectedSubsystem.label}{selectedSubsystem.badge ? ` - ${selectedSubsystem.badge}` : ""}</div>
+              <div style={{ fontFamily: "'Share Tech Mono',monospace", fontSize: 9, color: "#8fa0b0", lineHeight: 1.5, marginBottom: 6 }}>{selectedSubsystem.purpose}</div>
+              <div style={{ fontFamily: "'Share Tech Mono',monospace", fontSize: 8, color: "#4a5870", marginBottom: 3 }}>Approval posture: {selectedSubsystem.approvalPosture}</div>
+              <div style={{ fontFamily: "'Share Tech Mono',monospace", fontSize: 8, color: "#364556", lineHeight: 1.5 }}>{selectedSubsystem.notes}</div>
+            </div>
+            <div>
               <div style={{ fontFamily: "'Share Tech Mono',monospace", fontSize: 8, color: "#2e3d4d", letterSpacing: "0.15em", textTransform: "uppercase", marginBottom: 6 }}>Runtime Mode</div>
               <select value={runtimeMode} onChange={(event) => setRuntimeMode(event.target.value)} disabled={running} style={{ width: "100%", background: "#0b0e15", border: "1px solid #1a2530", borderRadius: 4, color: "#8fa0b0", padding: "9px 11px", fontFamily: "'Share Tech Mono',monospace", fontSize: 10 }}>
                 {availableRuntimeOptions.map((option) => (
@@ -669,7 +727,7 @@ export default function NexusAgentPlatform() {
               </span>
             </label>
             <div style={{ display: "grid", gap: 8 }}>
-              {TASK_PRESETS.map((preset) => (
+              {selectedSubsystem.presets.map((preset) => (
                 <button key={preset.id} type="button" disabled={running} onClick={() => { setTask(preset.task); setSelectedPresetId(preset.id); }} style={{ textAlign: "left", padding: "9px 11px", background: selectedPresetId === preset.id ? "#111522" : "#0b0e15", border: `1px solid ${selectedPresetId === preset.id ? "#f59e0b55" : "#1a2530"}`, borderRadius: 4, color: selectedPresetId === preset.id ? "#d5dde6" : "#8fa0b0", cursor: "pointer", fontFamily: "'Share Tech Mono',monospace", fontSize: 10 }}>
                   <div>{preset.label}</div>
                   <div style={{ marginTop: 4, color: "#4a5870", fontSize: 8 }}>{preset.category} - {preset.outcome}</div>
@@ -687,7 +745,7 @@ export default function NexusAgentPlatform() {
               {running ? "Team Active" : "Deploy Team"}
             </button>
             {(phase === "complete" || phase === "error") && (
-              <button onClick={() => { resetAll(); setTask(""); }} style={{ padding: "8px 0", background: "transparent", border: "1px solid #1a2530", borderRadius: 4, color: "#364556", cursor: "pointer", fontFamily: "Rajdhani,sans-serif", fontWeight: 600, fontSize: 11, letterSpacing: "0.1em", textTransform: "uppercase", width: "100%" }}>
+              <button onClick={() => { resetAll(); setTask(selectedPreset.task); }} style={{ padding: "8px 0", background: "transparent", border: "1px solid #1a2530", borderRadius: 4, color: "#364556", cursor: "pointer", fontFamily: "Rajdhani,sans-serif", fontWeight: 600, fontSize: 11, letterSpacing: "0.1em", textTransform: "uppercase", width: "100%" }}>
                 Reset
               </button>
             )}
@@ -826,7 +884,7 @@ export default function NexusAgentPlatform() {
                       style={{ textAlign: "left", padding: "9px 11px", background: "#07090e", border: "1px solid #1a2530", borderRadius: 4, color: "#8fa0b0", cursor: "pointer", fontFamily: "'Share Tech Mono',monospace", fontSize: 9 }}
                     >
                       <div>{session.time}</div>
-                      <div>{session.runtimeMode.toUpperCase()} {session.engine ? `- ${session.engine}` : ""} - {session.task.slice(0, 48)}{session.task.length > 48 ? "..." : ""}</div>
+                      <div>{(session.subsystemId || "mission").toUpperCase()} | {session.runtimeMode.toUpperCase()} {session.engine ? `- ${session.engine}` : ""} - {session.task.slice(0, 42)}{session.task.length > 42 ? "..." : ""}</div>
                     </button>
                   ))
                 )}
@@ -837,6 +895,7 @@ export default function NexusAgentPlatform() {
               {selectedRunMeta ? (
                 <>
                   <div style={{ display: "grid", gap: 4, fontFamily: "'Share Tech Mono',monospace", fontSize: 8, color: "#8fa0b0" }}>
+                    <div>Subsystem: {selectedRunMeta.subsystemId || "mission"}</div>
                     <div>Status: {selectedRunMeta.status || "unknown"}</div>
                     <div>Runtime: {selectedRunMeta.runtimeMode || "unknown"}</div>
                     <div>Engine: {selectedRunMeta.engineLabel || selectedRunMeta.engine || "n/a"}</div>
