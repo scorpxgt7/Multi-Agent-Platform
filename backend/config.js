@@ -162,12 +162,27 @@ export function isOriginAllowed(origin, allowedOrigins) {
   return allowedOrigins.includes(origin);
 }
 
-export function createCorsHeaders(origin, allowedOrigins) {
+function normalizeRequestedHeaders(value) {
+  if (typeof value !== "string" || !value.trim()) {
+    return [];
+  }
+
+  return value
+    .split(",")
+    .map((header) => header.trim())
+    .filter(Boolean);
+}
+
+export function createCorsHeaders(origin, allowedOrigins, requestedHeaders = "") {
   const allowOrigin = allowedOrigins.includes("*") ? "*" : (origin && allowedOrigins.includes(origin) ? origin : "null");
+  const defaultHeaders = ["Content-Type", "X-Nexus-Api-Key", "Authorization"];
+  const requested = normalizeRequestedHeaders(requestedHeaders);
+  const allowHeaders = Array.from(new Set([...defaultHeaders, ...requested]))
+    .join(",");
 
   return {
     "Access-Control-Allow-Origin": allowOrigin,
-    "Access-Control-Allow-Headers": "Content-Type",
+    "Access-Control-Allow-Headers": allowHeaders,
     "Access-Control-Allow-Methods": "GET,POST,OPTIONS",
     Vary: "Origin",
   };

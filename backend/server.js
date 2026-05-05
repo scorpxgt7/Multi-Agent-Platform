@@ -96,7 +96,11 @@ function collectJson(request) {
 
 const server = http.createServer(async (request, response) => {
   const requestOrigin = request.headers.origin;
-  const corsHeaders = createCorsHeaders(requestOrigin, CONFIG.allowedOrigins);
+  const corsHeaders = createCorsHeaders(
+    requestOrigin,
+    CONFIG.allowedOrigins,
+    request.headers["access-control-request-headers"],
+  );
 
   if (!request.url) {
     sendApiError(response, new ApiError(400, "missing_url", "Missing request URL."), corsHeaders);
