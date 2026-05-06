@@ -1,0 +1,131 @@
+version: "3.9"
+
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_DB: multi_agent
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d multi_agent"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  skill-service:
+    build:
+      context: ..
+      dockerfile: services/skill-service/Dockerfile
+    environment:
+      DATABASE_URL: postgresql+psycopg://postgres:postgres@postgres:5432/multi_agent
+      REDIS_URL: redis://redis:6379/0
+      EVENT_CHANNEL: multi-agent-events
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  agent-service:
+    build:
+      context: ..
+      dockerfile: services/agent-service/Dockerfile
+    environment:
+      DATABASE_URL: postgresql+psycopg://postgres:postgres@postgres:5432/multi_agent
+      REDIS_URL: redis://redis:6379/0
+      EVENT_CHANNEL: multi-agent-events
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  policy-service:
+    build:
+      context: ..
+      dockerfile: services/policy-service/Dockerfile
+    environment:
+      DATABASE_URL: postgresql+psycopg://postgres:postgres@postgres:5432/multi_agent
+      REDIS_URL: redis://redis:6379/0
+      EVENT_CHANNEL: multi-agent-events
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  memory-service:
+    build:
+      context: ..
+      dockerfile: services/memory-service/Dockerfile
+    environment:
+      DATABASE_URL: postgresql+psycopg://postgres:postgres@postgres:5432/multi_agent
+      REDIS_URL: redis://redis:6379/0
+      VECTOR_BACKEND: pgvector
+      EVENT_CHANNEL: multi-agent-events
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  orchestrator-service:
+    build:
+      context: ..
+      dockerfile: services/orchestrator-service/Dockerfile
+    environment:
+      DATABASE_URL: postgresql+psycopg://postgres:postgres@postgres:5432/multi_agent
+      REDIS_URL: redis://redis:6379/0
+      EVENT_CHANNEL: multi-agent-events
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      skill-service:
+        condition: service_started
+      agent-service:
+        condition: service_started
+      policy-service:
+        condition: service_started
+      memory-service:
+        condition: service_started
+
+  api-gateway:
+    build:
+      context: ..
+      dockerfile: services/api-gateway/Dockerfile
+    ports:
+      - "8080:8080"
+    environment:
+      SKILL_SERVICE_URL: http://skill-service:8101
+      AGENT_SERVICE_URL: http://agent-service:8102
+      POLICY_SERVICE_URL: http://policy-service:8103
+      ORCHESTRATOR_SERVICE_URL: http://orchestrator-service:8105
+    depends_on:
+      skill-service:
+        condition: service_started
+      agent-service:
+        condition: service_started
+      policy-service:
+        condition: service_started
+      orchestrator-service:
+        condition: service_started
+
+volumes:
+  pgdata:
