@@ -1,23 +1,31 @@
 from shared.schemas.api import (
     AgentCreate,
+    AgentUpdate,
     MemorySearch,
     MemoryWrite,
     PolicyCreate,
+    PolicyEvaluationRequest,
+    PolicyUpdate,
     RoleCreate,
     SkillCreate,
     SkillExecuteRequest,
     TaskCreate,
     TeamCreate,
+    TeamUpdate,
 )
 
 __all__ = [
     "AgentCreate",
+    "AgentUpdate",
     "MemorySearch",
     "MemoryWrite",
     "PolicyCreate",
+    "PolicyEvaluationRequest",
+    "PolicyUpdate",
     "RoleCreate",
     "SkillCreate",
     "SkillExecuteRequest",
     "TaskCreate",
     "TeamCreate",
+    "TeamUpdate",
 ]

@@ -40,7 +40,24 @@ class AgentCreate(BaseModel):
     skill_ids: list[str] = Field(default_factory=list)
 
 
+class AgentUpdate(BaseModel):
+    name: str
+    role_id: str
+    autonomy_level: Literal["guided", "supervised", "autonomous"] = "supervised"
+    memory_config: dict[str, Any] = Field(default_factory=dict)
+    skill_overrides: dict[str, Any] = Field(default_factory=dict)
+    config: dict[str, Any] = Field(default_factory=dict)
+    skill_ids: list[str] = Field(default_factory=list)
+
+
 class TeamCreate(BaseModel):
+    name: str
+    description: str = ""
+    governance_config: dict[str, Any] = Field(default_factory=dict)
+    agent_ids: list[str] = Field(default_factory=list)
+
+
+class TeamUpdate(BaseModel):
     name: str
     description: str = ""
     governance_config: dict[str, Any] = Field(default_factory=dict)
@@ -54,6 +71,30 @@ class PolicyCreate(BaseModel):
     approval_threshold: float = 0.75
     conditions: dict[str, Any] = Field(default_factory=dict)
     restrictions: dict[str, Any] = Field(default_factory=dict)
+
+
+class PolicyUpdate(BaseModel):
+    name: str
+    scope: str = "global"
+    effect: Literal["allow", "review", "deny"] = "review"
+    approval_threshold: float = 0.75
+    conditions: dict[str, Any] = Field(default_factory=dict)
+    restrictions: dict[str, Any] = Field(default_factory=dict)
+
+
+class PolicyEvaluationRequest(BaseModel):
+    role_id: str | None = None
+    team_id: str | None = None
+    skill_ids: list[str] = Field(default_factory=list)
+    target_agent_id: str | None = None
+    target_agent_name: str | None = None
+    provider_name: str | None = None
+    execution_mode: Literal["delegation", "skill_execution", "approval"] = "approval"
+    risk_score: float = 0.0
+    delegation_count: int = 0
+    skill_execution_count: int = 0
+    request_id: str | None = None
+    context: dict[str, Any] = Field(default_factory=dict)
 
 
 class TaskCreate(BaseModel):

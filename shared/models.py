@@ -25,6 +25,14 @@ class PolicyEffect(str, enum.Enum):
     deny = "deny"
 
 
+class ExecutionStatus(str, enum.Enum):
+    queued = "queued"
+    running = "running"
+    awaiting_approval = "awaiting_approval"
+    completed = "completed"
+    failed = "failed"
+
+
 class Skill(Base):
     __tablename__ = "skills"
 
@@ -138,6 +146,44 @@ class AuditLog(Base):
     actor_id: Mapped[str] = mapped_column(String(128), nullable=False, default="system")
     resource_type: Mapped[str] = mapped_column(String(128), nullable=False, default="platform")
     resource_id: Mapped[str] = mapped_column(String(128), nullable=False, default="global")
+    payload: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    created_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+
+class ExecutionRun(Base):
+    __tablename__ = "execution_runs"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True, default=lambda: str(uuid.uuid4()))
+    request_id: Mapped[str] = mapped_column(String(64), nullable=False, unique=True, index=True)
+    team_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    actor_id: Mapped[str] = mapped_column(String(128), nullable=False, default="head-admin")
+    subsystem: Mapped[str] = mapped_column(String(64), nullable=False, default="mission")
+    task: Mapped[str] = mapped_column(Text, nullable=False)
+    latest_status: Mapped[ExecutionStatus] = mapped_column(Enum(ExecutionStatus), nullable=False, default=ExecutionStatus.queued, index=True)
+    final_status: Mapped[str] = mapped_column(String(64), nullable=False, default="queued")
+    current_step: Mapped[str] = mapped_column(String(128), nullable=False, default="received")
+    delegation_chain: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
+    provider_usage: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
+    context: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    result_payload: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    state_snapshot: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    error_message: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    started_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    completed_at: Mapped[DateTime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class ExecutionEvent(Base):
+    __tablename__ = "execution_events"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    execution_id: Mapped[str] = mapped_column(ForeignKey("execution_runs.id", ondelete="CASCADE"), nullable=False, index=True)
+    request_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    team_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    event_type: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
+    status: Mapped[str] = mapped_column(String(64), nullable=False, default="queued")
+    agent_name: Mapped[str] = mapped_column(String(128), nullable=False, default="")
+    skill_id: Mapped[str] = mapped_column(String(64), nullable=False, default="")
+    provider_name: Mapped[str] = mapped_column(String(128), nullable=False, default="")
     payload: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
     created_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 

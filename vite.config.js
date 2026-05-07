@@ -26,6 +26,11 @@ export default defineConfig({
         target: "http://127.0.0.1:8787",
         changeOrigin: true,
       },
+      "/registry-api": {
+        target: process.env.VITE_REGISTRY_PROXY_TARGET || "http://127.0.0.1:8080",
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/registry-api/, "/api"),
+      },
     },
   },
 });
