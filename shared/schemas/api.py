@@ -30,6 +30,30 @@ class RoleCreate(BaseModel):
     skill_ids: list[str] = Field(default_factory=list)
 
 
+class OrganizationBootstrap(BaseModel):
+    organization_name: str
+    organization_slug: str
+    workspace_name: str = ""
+    workspace_slug: str = ""
+    operator_name: str
+    operator_email: str
+
+
+class OperatorCreate(BaseModel):
+    name: str
+    email: str
+    role: Literal["admin", "operator", "viewer"] = "viewer"
+    permissions: dict[str, Any] = Field(default_factory=dict)
+
+
+class OperatorUpdate(BaseModel):
+    name: str
+    email: str
+    role: Literal["admin", "operator", "viewer"] = "viewer"
+    permissions: dict[str, Any] = Field(default_factory=dict)
+    is_active: bool = True
+
+
 class AgentCreate(BaseModel):
     name: str
     role_id: str
@@ -102,6 +126,8 @@ class TaskCreate(BaseModel):
     task: str
     actor_id: str = "head-admin"
     subsystem: str = "mission"
+    organization_id: str | None = None
+    operator_id: str | None = None
     context: dict[str, Any] = Field(default_factory=dict)
     short_term_memory: list[dict[str, Any]] = Field(default_factory=list)
 

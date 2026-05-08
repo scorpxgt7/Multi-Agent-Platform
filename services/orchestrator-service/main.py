@@ -1,13 +1,14 @@
 from typing import Any, TypedDict
 
 import httpx
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 
 from execution_store import ExecutionStore
 from shared.schemas import TaskCreate
 from shared.utils.config import load_settings
 from shared.utils.database import create_session_factory
 from shared.utils.events import EventBus
+from shared.utils.security import require_request_organization, request_scope
 
 try:
     from langgraph.graph import END, StateGraph
@@ -30,6 +31,7 @@ MEMORY_SERVICE_URL = "http://memory-service:8104"
 class WorkflowState(TypedDict, total=False):
     request_id: str
     execution_id: str
+    organization_id: str
     task: str
     team_id: str
     actor_id: str
@@ -61,6 +63,7 @@ def transition(state: WorkflowState, *, status: str, step: str, event_type: str,
     execution_store.append_event(
         execution_id=state["execution_id"],
         request_id=state["request_id"],
+        organization_id=state["organization_id"],
         team_id=state["team_id"],
         event_type=event_type,
         status=status,
@@ -105,6 +108,7 @@ def set_policy_violation(state: WorkflowState, *, stage: str, decision: dict[str
     execution_store.append_event(
         execution_id=state["execution_id"],
         request_id=state["request_id"],
+        organization_id=state["organization_id"],
         team_id=state["team_id"],
         event_type="policy.violation",
         status="failed",
@@ -133,7 +137,8 @@ async def head_admin(state: WorkflowState):
         agent_name="head-admin",
         payload={"message": "Head Admin accepted task and is loading team context."},
     )
-    async with httpx.AsyncClient(timeout=20.0) as client:
+    internal_headers = {"x-organization-id": state["organization_id"], "x-operator-id": state.get("actor_id", ""), "x-operator-role": state.get("context", {}).get("operator_role", "operator")}
+    async with httpx.AsyncClient(timeout=20.0, headers=internal_headers) as client:
         try:
             team_response = await client.get(f"{AGENT_SERVICE_URL}/v1/teams/{state['team_id']}")
             if team_response.is_success:
@@ -173,6 +178,7 @@ async def head_admin(state: WorkflowState):
                 "context": {
                     **state.get("context", {}),
                     "subsystem": state["subsystem"],
+                    "organization_id": state["organization_id"],
                 },
             },
         )
@@ -189,6 +195,7 @@ async def head_admin(state: WorkflowState):
     execution_store.append_event(
         execution_id=state["execution_id"],
         request_id=state["request_id"],
+        organization_id=state["organization_id"],
         team_id=state["team_id"],
         event_type="agent.delegated",
         status="running",
@@ -215,7 +222,8 @@ async def finance_agent(state: WorkflowState):
         agent_name="finance-agent",
         payload={"message": "Finance agent is evaluating the task."},
     )
-    async with httpx.AsyncClient(timeout=20.0) as client:
+    internal_headers = {"x-organization-id": state["organization_id"], "x-operator-id": state.get("actor_id", ""), "x-operator-role": state.get("context", {}).get("operator_role", "operator")}
+    async with httpx.AsyncClient(timeout=20.0, headers=internal_headers) as client:
         skill_id = state.get("context", {}).get("skill_id")
         if not skill_id:
             skill_id = state.get("context", {}).get("default_skill_id", "demo-skill")
@@ -235,6 +243,7 @@ async def finance_agent(state: WorkflowState):
                 "context": {
                     **state.get("context", {}),
                     "subsystem": state["subsystem"],
+                    "organization_id": state["organization_id"],
                 },
             },
         )
@@ -254,6 +263,7 @@ async def finance_agent(state: WorkflowState):
                 "team_id": state["team_id"],
                 "request_id": state["request_id"],
                 "subsystem": state["subsystem"],
+                "organization_id": state["organization_id"],
                 "skill_execution_count": state.get("skill_execution_count", 0) + 1,
             },
             "actor_id": "finance-agent",
@@ -282,6 +292,7 @@ async def finance_agent(state: WorkflowState):
             execution_store.append_event(
                 execution_id=state["execution_id"],
                 request_id=state["request_id"],
+                organization_id=state["organization_id"],
                 team_id=state["team_id"],
                 event_type="skill.executed",
                 status="running",
@@ -296,6 +307,7 @@ async def finance_agent(state: WorkflowState):
     execution_store.append_event(
         execution_id=state["execution_id"],
         request_id=state["request_id"],
+        organization_id=state["organization_id"],
         team_id=state["team_id"],
         event_type="agent.decision",
         status="running",
@@ -322,7 +334,8 @@ async def approval_gate(state: WorkflowState):
         agent_name="policy-service",
         payload={"message": "Approval gate is evaluating restrictions and thresholds."},
     )
-    async with httpx.AsyncClient(timeout=20.0) as client:
+    internal_headers = {"x-organization-id": state["organization_id"], "x-operator-id": state.get("actor_id", ""), "x-operator-role": state.get("context", {}).get("operator_role", "operator")}
+    async with httpx.AsyncClient(timeout=20.0, headers=internal_headers) as client:
         try:
             governance = state.get("team", {}).get("governance_config", {})
             response = await client.post(
@@ -337,6 +350,7 @@ async def approval_gate(state: WorkflowState):
                     "context": {
                         **state.get("context", {}),
                         "subsystem": state["subsystem"],
+                        "organization_id": state["organization_id"],
                     },
                 },
             )
@@ -347,6 +361,7 @@ async def approval_gate(state: WorkflowState):
     execution_store.append_event(
         execution_id=state["execution_id"],
         request_id=state["request_id"],
+        organization_id=state["organization_id"],
         team_id=state["team_id"],
         event_type="approval.evaluated",
         status="running",
@@ -380,6 +395,7 @@ async def awaiting_approval(state: WorkflowState):
     execution_store.append_event(
         execution_id=state["execution_id"],
         request_id=state["request_id"],
+        organization_id=state["organization_id"],
         team_id=state["team_id"],
         event_type="task.completed",
         status="awaiting_approval",
@@ -408,7 +424,8 @@ async def finalize(state: WorkflowState):
         agent_name="head-admin",
         payload={"message": "Persisting final long-term memory and closing execution."},
     )
-    async with httpx.AsyncClient(timeout=20.0) as client:
+    internal_headers = {"x-organization-id": state["organization_id"], "x-operator-id": state.get("actor_id", ""), "x-operator-role": state.get("context", {}).get("operator_role", "operator")}
+    async with httpx.AsyncClient(timeout=20.0, headers=internal_headers) as client:
         try:
             await client.post(
                 f"{MEMORY_SERVICE_URL}/v1/memory/write",
@@ -432,6 +449,7 @@ async def finalize(state: WorkflowState):
     execution_store.append_event(
         execution_id=state["execution_id"],
         request_id=state["request_id"],
+        organization_id=state["organization_id"],
         team_id=state["team_id"],
         event_type="task.completed",
         status="completed",
@@ -462,6 +480,7 @@ async def policy_blocked(state: WorkflowState):
     execution_store.append_event(
         execution_id=state["execution_id"],
         request_id=state["request_id"],
+        organization_id=state["organization_id"],
         team_id=state["team_id"],
         event_type="task.failed",
         status="failed",
@@ -511,34 +530,41 @@ def health():
 
 
 @app.get("/v1/executions")
-def list_executions():
-    return {"ok": True, "executions": execution_store.list_runs()}
+def list_executions(request: Request):
+    organization_id = require_request_organization(request)
+    return {"ok": True, "executions": execution_store.list_runs(organization_id)}
 
 
 @app.get("/v1/executions/{request_id}")
-def get_execution(request_id: str):
-    detail = execution_store.get_run_detail(request_id)
+def get_execution(request_id: str, request: Request):
+    organization_id = require_request_organization(request)
+    detail = execution_store.get_run_detail(request_id, organization_id)
     if not detail:
         raise HTTPException(status_code=404, detail="execution_not_found")
     return {"ok": True, **detail}
 
 
 @app.get("/v1/executions/{request_id}/status")
-def get_execution_status(request_id: str):
-    status = execution_store.get_status(request_id)
+def get_execution_status(request_id: str, request: Request):
+    organization_id = require_request_organization(request)
+    status = execution_store.get_status(request_id, organization_id)
     if not status:
         raise HTTPException(status_code=404, detail="execution_not_found")
     return {"ok": True, "status": status}
 
 
 @app.post("/v1/tasks")
-async def create_task(payload: TaskCreate):
+async def create_task(payload: TaskCreate, request: Request):
     if GRAPH is None:
         raise HTTPException(status_code=503, detail="LangGraph dependency is unavailable for orchestrator-service.")
 
+    organization_id = require_request_organization(request)
+    operator_context = request_scope(request)
+
     execution_identifiers = execution_store.create_run(
+        organization_id=organization_id,
         team_id=payload.team_id,
-        actor_id=payload.actor_id,
+        actor_id=operator_context["operator_id"] or payload.actor_id,
         subsystem=payload.subsystem,
         task=payload.task,
         context=payload.context,
@@ -546,11 +572,17 @@ async def create_task(payload: TaskCreate):
     initial_state: WorkflowState = {
         "request_id": execution_identifiers["request_id"],
         "execution_id": execution_identifiers["execution_id"],
+        "organization_id": organization_id,
         "task": payload.task,
         "team_id": payload.team_id,
-        "actor_id": payload.actor_id,
+        "actor_id": operator_context["operator_id"] or payload.actor_id,
         "subsystem": payload.subsystem,
-        "context": payload.context,
+        "context": {
+            **payload.context,
+            "organization_id": organization_id,
+            "operator_id": operator_context["operator_id"] or payload.operator_id,
+            "operator_role": operator_context["operator_role"] or "operator",
+        },
         "short_term_memory": payload.short_term_memory,
         "delegation_chain": [],
         "provider_usage": [],
@@ -564,6 +596,7 @@ async def create_task(payload: TaskCreate):
         execution_store.append_event(
             execution_id=execution_identifiers["execution_id"],
             request_id=execution_identifiers["request_id"],
+            organization_id=organization_id,
             team_id=payload.team_id,
             event_type="task.failed",
             status="failed",
@@ -585,4 +618,5 @@ async def create_task(payload: TaskCreate):
 
     final_result = result.get("final_result", {})
     final_result["request_id"] = execution_identifiers["request_id"]
+    final_result["organization_id"] = organization_id
     return {"ok": True, "request_id": execution_identifiers["request_id"], "result": final_result, "state": result}

@@ -22,13 +22,14 @@ class ExecutionStore:
     def __init__(self, session_factory):
         self.session_factory = session_factory
 
-    def create_run(self, *, team_id: str, actor_id: str, subsystem: str, task: str, context: dict[str, Any]) -> dict[str, str]:
+    def create_run(self, *, organization_id: str, team_id: str, actor_id: str, subsystem: str, task: str, context: dict[str, Any]) -> dict[str, str]:
         request_id = str(uuid.uuid4())
         execution_id = str(uuid.uuid4())
         with self.session_factory() as session:
             run = ExecutionRun(
                 id=execution_id,
                 request_id=request_id,
+                organization_id=organization_id,
                 team_id=team_id,
                 actor_id=actor_id,
                 subsystem=subsystem,
@@ -45,6 +46,7 @@ class ExecutionStore:
                 ExecutionEvent(
                     execution_id=execution_id,
                     request_id=request_id,
+                    organization_id=organization_id,
                     team_id=team_id,
                     event_type="task.received",
                     status=ExecutionStatus.queued.value,
@@ -60,6 +62,7 @@ class ExecutionStore:
         *,
         execution_id: str,
         request_id: str,
+        organization_id: str,
         team_id: str,
         event_type: str,
         status: str,
@@ -73,6 +76,7 @@ class ExecutionStore:
                 ExecutionEvent(
                     execution_id=execution_id,
                     request_id=request_id,
+                    organization_id=organization_id,
                     team_id=team_id,
                     event_type=event_type,
                     status=status,
@@ -118,13 +122,14 @@ class ExecutionStore:
                 run.completed_at = now_utc()
             session.commit()
 
-    def list_runs(self) -> list[dict[str, Any]]:
+    def list_runs(self, organization_id: str) -> list[dict[str, Any]]:
         with self.session_factory() as session:
-            runs = session.scalars(select(ExecutionRun).order_by(ExecutionRun.started_at.desc()).limit(50)).all()
+            runs = session.scalars(select(ExecutionRun).where(ExecutionRun.organization_id == organization_id).order_by(ExecutionRun.started_at.desc()).limit(50)).all()
             return [
                 {
                     "id": run.id,
                     "request_id": run.request_id,
+                    "organization_id": run.organization_id,
                     "team_id": run.team_id,
                     "actor_id": run.actor_id,
                     "subsystem": run.subsystem,
@@ -141,9 +146,9 @@ class ExecutionStore:
                 for run in runs
             ]
 
-    def get_run_detail(self, request_id: str) -> dict[str, Any] | None:
+    def get_run_detail(self, request_id: str, organization_id: str) -> dict[str, Any] | None:
         with self.session_factory() as session:
-            run = session.scalar(select(ExecutionRun).where(ExecutionRun.request_id == request_id))
+            run = session.scalar(select(ExecutionRun).where(ExecutionRun.request_id == request_id, ExecutionRun.organization_id == organization_id))
             if not run:
                 return None
             events = session.scalars(select(ExecutionEvent).where(ExecutionEvent.execution_id == run.id).order_by(ExecutionEvent.created_at.asc(), ExecutionEvent.id.asc())).all()
@@ -151,6 +156,7 @@ class ExecutionStore:
                 "execution": {
                     "id": run.id,
                     "request_id": run.request_id,
+                    "organization_id": run.organization_id,
                     "team_id": run.team_id,
                     "actor_id": run.actor_id,
                     "subsystem": run.subsystem,
@@ -182,13 +188,14 @@ class ExecutionStore:
                 ],
             }
 
-    def get_status(self, request_id: str) -> dict[str, Any] | None:
+    def get_status(self, request_id: str, organization_id: str) -> dict[str, Any] | None:
         with self.session_factory() as session:
-            run = session.scalar(select(ExecutionRun).where(ExecutionRun.request_id == request_id))
+            run = session.scalar(select(ExecutionRun).where(ExecutionRun.request_id == request_id, ExecutionRun.organization_id == organization_id))
             if not run:
                 return None
             return {
                 "request_id": run.request_id,
+                "organization_id": run.organization_id,
                 "team_id": run.team_id,
                 "latest_status": status_value(run.latest_status),
                 "current_step": run.current_step,

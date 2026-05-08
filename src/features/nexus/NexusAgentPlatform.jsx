@@ -408,15 +408,28 @@ export default function NexusAgentPlatform() {
     const startedAt = new Date().toISOString();
 
     try {
-      const result = await runPipelineWithRuntime(runtimeMode, { task, agents: activeAgents, engine: selectedEngine, baseUrl: backendBaseUrl, apiKey: backendApiKey });
+      const result = await runPipelineWithRuntime(runtimeMode, {
+        task,
+        agents: activeAgents,
+        engine: selectedEngine,
+        subsystemId: selectedSubsystemId,
+        presetId: selectedPresetId,
+        baseUrl: backendBaseUrl,
+        apiKey: backendApiKey,
+      });
+      const resultWithContext = {
+        ...result,
+        subsystemId: result.subsystemId || selectedSubsystemId,
+        presetId: result.presetId || selectedPresetId,
+      };
       const completedAt = new Date().toISOString();
-      result.statuses.forEach((entry) => {
+      resultWithContext.statuses.forEach((entry) => {
         setStatus(entry.id, entry.status);
       });
-      result.entries.forEach((entry) => {
+      resultWithContext.entries.forEach((entry) => {
         addLog(entry.from, entry.message, entry.type);
       });
-      setFinalOutput(result.finalOutput);
+      setFinalOutput(resultWithContext.finalOutput);
       setPhase("complete");
       setActiveTab("output");
       setSessionHistory((previous) => [
@@ -425,8 +438,8 @@ export default function NexusAgentPlatform() {
           subsystemId: selectedSubsystemId,
           presetId: selectedPresetId,
           runtimeMode,
-          engine: result.engine || runtimeHealth?.defaultEngine || "local-simulation",
-          engineLabel: result.engineLabel || result.engine || runtimeHealth?.defaultEngine || "local-simulation",
+          engine: resultWithContext.engine || runtimeHealth?.defaultEngine || "local-simulation",
+          engineLabel: resultWithContext.engineLabel || resultWithContext.engine || runtimeHealth?.defaultEngine || "local-simulation",
           status: "completed",
           startedAt,
           completedAt,
@@ -435,7 +448,7 @@ export default function NexusAgentPlatform() {
           errorMessage: null,
           task,
           time: new Date().toLocaleString("en-US"),
-          finalOutput: result.finalOutput,
+          finalOutput: resultWithContext.finalOutput,
         },
         ...previous,
       ]);
@@ -445,11 +458,11 @@ export default function NexusAgentPlatform() {
       }
       setSelectedRunMeta({
         id: result.id || Date.now(),
-        subsystemId: selectedSubsystemId,
-        presetId: selectedPresetId,
+          subsystemId: selectedSubsystemId,
+          presetId: selectedPresetId,
         runtimeMode,
-        engine: result.engine || runtimeHealth?.defaultEngine || "local-simulation",
-        engineLabel: result.engineLabel || result.engine || runtimeHealth?.defaultEngine || "local-simulation",
+        engine: resultWithContext.engine || runtimeHealth?.defaultEngine || "local-simulation",
+        engineLabel: resultWithContext.engineLabel || resultWithContext.engine || runtimeHealth?.defaultEngine || "local-simulation",
         status: "completed",
         startedAt,
         completedAt,

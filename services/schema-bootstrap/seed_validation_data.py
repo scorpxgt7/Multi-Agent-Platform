@@ -1,10 +1,35 @@
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from shared.models import Agent, AgentSkill, Policy, PolicyEffect, Role, RoleSkill, Skill, Team, TeamAgent
+from shared.models import Agent, AgentSkill, Operator, OperatorRole, Organization, Policy, PolicyEffect, Role, RoleSkill, Skill, Team, TeamAgent
 
 
 def seed_validation_data(session: Session):
+    organization = session.scalar(select(Organization).where(Organization.slug == "validation-org"))
+    if organization is None:
+        organization = Organization(
+            name="Validation Organization",
+            slug="validation-org",
+            workspace_name="Validation Workspace",
+            workspace_slug="validation-workspace",
+        )
+        session.add(organization)
+        session.flush()
+
+    admin_operator = session.scalar(select(Operator).where(Operator.email == "validation-admin@example.com"))
+    if admin_operator is None:
+        admin_operator = Operator(
+            organization_id=organization.id,
+            name="Validation Admin",
+            email="validation-admin@example.com",
+            role=OperatorRole.admin,
+            api_key="validation-admin-key",
+            permissions={},
+            is_active=True,
+        )
+        session.add(admin_operator)
+        session.flush()
+
     skill = session.scalar(select(Skill).where(Skill.slug == "finance-approval-skill"))
     if skill is None:
         skill = Skill(
@@ -39,6 +64,7 @@ def seed_validation_data(session: Session):
     agent = session.scalar(select(Agent).where(Agent.name == "Finance Agent"))
     if agent is None:
         agent = Agent(
+            organization_id=organization.id,
             name="Finance Agent",
             role_id=role.id,
             autonomy_level="supervised",
@@ -53,6 +79,7 @@ def seed_validation_data(session: Session):
     team = session.scalar(select(Team).where(Team.name == "Head Admin Team"))
     if team is None:
         team = Team(
+            organization_id=organization.id,
             name="Head Admin Team",
             description="Validation team for end-to-end orchestration checks.",
             governance_config={"risk_score": 0.25},
@@ -64,6 +91,7 @@ def seed_validation_data(session: Session):
     policy = session.scalar(select(Policy).where(Policy.name == "Validation Approval Policy"))
     if policy is None:
         policy = Policy(
+            organization_id=organization.id,
             name="Validation Approval Policy",
             scope="validation",
             effect=PolicyEffect.review,

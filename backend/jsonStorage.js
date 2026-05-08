@@ -7,6 +7,8 @@ const RUNS_PATH = path.join(DATA_DIR, "nexus-runs.json");
 function buildRunSummary(run) {
   return {
     id: run.id,
+    subsystemId: run.subsystemId || "mission",
+    presetId: run.presetId || null,
     runtimeMode: run.runtimeMode,
     engine: run.engine,
     engineLabel: run.engineLabel || run.engine,

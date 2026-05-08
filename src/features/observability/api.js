@@ -1,7 +1,11 @@
+import { buildIdentityHeaders } from "../identity/session.js";
+
 const OBSERVABILITY_API_BASE = (import.meta.env.VITE_REGISTRY_API_BASE || "/registry-api").replace(/\/$/, "");
 
 async function request(path) {
-  const response = await fetch(`${OBSERVABILITY_API_BASE}${path}`);
+  const response = await fetch(`${OBSERVABILITY_API_BASE}${path}`, {
+    headers: buildIdentityHeaders(),
+  });
   const payload = await response.json();
   if (!response.ok || !payload.ok) {
     throw new Error(payload?.detail || payload?.error || "Observability request failed.");

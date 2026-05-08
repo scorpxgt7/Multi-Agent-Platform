@@ -43,13 +43,13 @@ async function readApiError(response, fallbackMessage) {
   }
 }
 
-export async function runBackendPipeline({ task, agents, engine = "local-simulation", baseUrl = "", apiKey = "" }) {
+export async function runBackendPipeline({ task, agents, engine = "local-simulation", subsystemId = "mission", presetId = null, baseUrl = "", apiKey = "" }) {
   const response = await fetch(createApiUrl("/nexus/run", baseUrl), {
     method: "POST",
     headers: createApiHeaders(apiKey, {
       "Content-Type": "application/json",
     }),
-    body: JSON.stringify({ task, agents, engine }),
+    body: JSON.stringify({ task, agents, engine, subsystemId, presetId }),
   });
 
   if (!response.ok) {

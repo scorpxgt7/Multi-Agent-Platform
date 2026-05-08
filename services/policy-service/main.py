@@ -1,14 +1,15 @@
 from typing import Any
 
-from fastapi import Depends, FastAPI, HTTPException
+from fastapi import Depends, FastAPI, HTTPException, Request
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from shared.models import AuditLog, Policy, PolicyEffect, Role
+from shared.models import AuditLog, Policy, Role
 from shared.schemas import PolicyCreate, PolicyEvaluationRequest, PolicyUpdate
 from shared.utils.config import load_settings
 from shared.utils.database import create_session_factory
 from shared.utils.events import EventBus
+from shared.utils.security import request_scope
 
 settings = load_settings("policy-service", 8103)
 SessionLocal = create_session_factory(settings.database_url)
@@ -21,6 +22,15 @@ def get_db():
         yield session
 
 
+def request_organization_id(request: Request, payload_context: dict[str, Any] | None = None) -> str:
+    organization_id = request.headers.get("x-organization-id")
+    if organization_id:
+        return organization_id
+    if payload_context and payload_context.get("organization_id"):
+        return payload_context["organization_id"]
+    raise HTTPException(status_code=401, detail="organization_scope_required")
+
+
 def policy_effect_value(effect):
     return effect.value if hasattr(effect, "value") else str(effect)
 
@@ -31,14 +41,6 @@ def listify(value):
     if isinstance(value, list):
         return value
     return [value]
-
-
-def matches_list_condition(expected, actual):
-    expected_items = listify(expected)
-    if not expected_items:
-        return True
-    actual_items = listify(actual)
-    return any(item in actual_items for item in expected_items)
 
 
 def matches_context_tag(expected_tags, context):
@@ -98,8 +100,10 @@ def health():
 
 
 @app.post("/v1/policies")
-def create_policy(payload: PolicyCreate, db: Session = Depends(get_db)):
+def create_policy(payload: PolicyCreate, request: Request, db: Session = Depends(get_db)):
+    organization_id = request_organization_id(request)
     policy = Policy(
+        organization_id=organization_id,
         name=payload.name,
         scope=payload.scope,
         effect=payload.effect,
@@ -112,25 +116,27 @@ def create_policy(payload: PolicyCreate, db: Session = Depends(get_db)):
     db.add(
         AuditLog(
             event_type="policy.created",
-            actor_type="service",
-            actor_id=settings.service_name,
+            actor_type="operator",
+            actor_id=request_scope(request)["operator_id"] or settings.service_name,
             resource_type="policy",
             resource_id=policy.id,
-            payload={"scope": policy.scope},
+            payload={"scope": policy.scope, "organization_id": organization_id},
         )
     )
     db.commit()
-    return {"ok": True, "policy": {"id": policy.id, "name": policy.name, "effect": policy_effect_value(policy.effect)}}
+    return {"ok": True, "policy": {"id": policy.id, "organization_id": organization_id, "name": policy.name, "effect": policy_effect_value(policy.effect)}}
 
 
 @app.get("/v1/policies")
-def list_policies(db: Session = Depends(get_db)):
-    policies = db.scalars(select(Policy).order_by(Policy.created_at.asc())).all()
+def list_policies(request: Request, db: Session = Depends(get_db)):
+    organization_id = request_organization_id(request)
+    policies = db.scalars(select(Policy).where(Policy.organization_id == organization_id).order_by(Policy.created_at.asc())).all()
     return {
         "ok": True,
         "policies": [
             {
                 "id": policy.id,
+                "organization_id": organization_id,
                 "name": policy.name,
                 "scope": policy.scope,
                 "effect": policy_effect_value(policy.effect),
@@ -144,9 +150,10 @@ def list_policies(db: Session = Depends(get_db)):
 
 
 @app.put("/v1/policies/{policy_id}")
-def update_policy(policy_id: str, payload: PolicyUpdate, db: Session = Depends(get_db)):
+def update_policy(policy_id: str, payload: PolicyUpdate, request: Request, db: Session = Depends(get_db)):
+    organization_id = request_organization_id(request)
     policy = db.get(Policy, policy_id)
-    if not policy:
+    if not policy or policy.organization_id != organization_id:
         raise HTTPException(status_code=404, detail="policy_not_found")
     policy.name = payload.name
     policy.scope = payload.scope
@@ -157,20 +164,21 @@ def update_policy(policy_id: str, payload: PolicyUpdate, db: Session = Depends(g
     db.add(
         AuditLog(
             event_type="policy.updated",
-            actor_type="service",
-            actor_id=settings.service_name,
+            actor_type="operator",
+            actor_id=request_scope(request)["operator_id"] or settings.service_name,
             resource_type="policy",
             resource_id=policy.id,
-            payload={"scope": policy.scope},
+            payload={"scope": policy.scope, "organization_id": organization_id},
         )
     )
     db.commit()
-    return {"ok": True, "policy": {"id": policy.id, "name": policy.name, "effect": policy_effect_value(policy.effect)}}
+    return {"ok": True, "policy": {"id": policy.id, "organization_id": organization_id, "name": policy.name, "effect": policy_effect_value(policy.effect)}}
 
 
 @app.post("/v1/policies/evaluate")
-def evaluate_policy(payload: PolicyEvaluationRequest, db: Session = Depends(get_db)):
-    policies = db.scalars(select(Policy)).all()
+def evaluate_policy(payload: PolicyEvaluationRequest, request: Request, db: Session = Depends(get_db)):
+    organization_id = request_organization_id(request, payload.context)
+    policies = db.scalars(select(Policy).where(Policy.organization_id == organization_id)).all()
     role = db.get(Role, payload.role_id) if payload.role_id else None
     matched_policies = [policy for policy in policies if policy_matches(policy, payload)]
 
@@ -259,6 +267,7 @@ def evaluate_policy(payload: PolicyEvaluationRequest, db: Session = Depends(get_
         "matched_policies": matched_policy_names,
         "violations": violations,
         "role_permissions": role_permissions,
+        "organization_id": organization_id,
     }
     db.add(
         AuditLog(
@@ -279,6 +288,7 @@ def evaluate_policy(payload: PolicyEvaluationRequest, db: Session = Depends(get_
             "role_id": payload.role_id,
             "execution_mode": payload.execution_mode,
             "request_id": payload.request_id,
+            "organization_id": organization_id,
         },
     )
     return {"ok": True, "decision": decision}

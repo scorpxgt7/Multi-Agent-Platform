@@ -277,6 +277,8 @@ const server = http.createServer(async (request, response) => {
 
   if (request.method === "POST" && request.url === "/api/nexus/run") {
     let task = "";
+    let subsystemId = "mission";
+    let presetId = null;
     let requestedEngineId = getDefaultEngineId();
     let startedAt = new Date().toISOString();
 
@@ -285,6 +287,8 @@ const server = http.createServer(async (request, response) => {
       const availableEngines = await listEngines();
       const validated = validateRunPayload(payload, availableEngines);
       task = validated.task;
+      subsystemId = validated.subsystemId || "mission";
+      presetId = validated.presetId || null;
       const agents = validated.agents;
       requestedEngineId = validated.requestedEngineId || getDefaultEngineId();
       const engine = getEngine(requestedEngineId);
@@ -302,6 +306,8 @@ const server = http.createServer(async (request, response) => {
       const completedAt = new Date().toISOString();
       const runRecord = {
         id: crypto.randomUUID(),
+        subsystemId,
+        presetId,
         runtimeMode: "backend",
         engine: engine.id,
         engineLabel: engine.label,
@@ -336,6 +342,8 @@ const server = http.createServer(async (request, response) => {
       sendApiSuccess(response, 200, {
         ...result,
         id: runRecord.id,
+        subsystemId,
+        presetId,
         engine: engine.id,
         engineLabel: engine.label,
       }, corsHeaders);
@@ -347,6 +355,8 @@ const server = http.createServer(async (request, response) => {
           const failedRunId = crypto.randomUUID();
           await saveRunRecord({
             id: failedRunId,
+            subsystemId,
+            presetId,
             runtimeMode: "backend",
             engine: requestedEngineId,
             engineLabel: null,

@@ -25,6 +25,12 @@ class PolicyEffect(str, enum.Enum):
     deny = "deny"
 
 
+class OperatorRole(str, enum.Enum):
+    admin = "admin"
+    operator = "operator"
+    viewer = "viewer"
+
+
 class ExecutionStatus(str, enum.Enum):
     queued = "queued"
     running = "running"
@@ -85,6 +91,7 @@ class Agent(Base):
     __tablename__ = "agents"
 
     id: Mapped[str] = mapped_column(String(64), primary_key=True, default=lambda: str(uuid.uuid4()))
+    organization_id: Mapped[str] = mapped_column(ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
     name: Mapped[str] = mapped_column(String(128), nullable=False)
     role_id: Mapped[str] = mapped_column(ForeignKey("roles.id", ondelete="RESTRICT"), nullable=False, index=True)
     autonomy_level: Mapped[AutonomyLevel] = mapped_column(Enum(AutonomyLevel), nullable=False, default=AutonomyLevel.supervised)
@@ -108,6 +115,7 @@ class Team(Base):
     __tablename__ = "teams"
 
     id: Mapped[str] = mapped_column(String(64), primary_key=True, default=lambda: str(uuid.uuid4()))
+    organization_id: Mapped[str] = mapped_column(ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
     name: Mapped[str] = mapped_column(String(128), nullable=False, unique=True)
     description: Mapped[str] = mapped_column(Text, nullable=False, default="")
     governance_config: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
@@ -128,6 +136,7 @@ class Policy(Base):
     __tablename__ = "policies"
 
     id: Mapped[str] = mapped_column(String(64), primary_key=True, default=lambda: str(uuid.uuid4()))
+    organization_id: Mapped[str] = mapped_column(ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
     name: Mapped[str] = mapped_column(String(128), nullable=False, unique=True)
     scope: Mapped[str] = mapped_column(String(64), nullable=False, default="global")
     effect: Mapped[PolicyEffect] = mapped_column(Enum(PolicyEffect), nullable=False, default=PolicyEffect.review)
@@ -155,6 +164,7 @@ class ExecutionRun(Base):
 
     id: Mapped[str] = mapped_column(String(64), primary_key=True, default=lambda: str(uuid.uuid4()))
     request_id: Mapped[str] = mapped_column(String(64), nullable=False, unique=True, index=True)
+    organization_id: Mapped[str] = mapped_column(ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
     team_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
     actor_id: Mapped[str] = mapped_column(String(128), nullable=False, default="head-admin")
     subsystem: Mapped[str] = mapped_column(String(64), nullable=False, default="mission")
@@ -178,6 +188,7 @@ class ExecutionEvent(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     execution_id: Mapped[str] = mapped_column(ForeignKey("execution_runs.id", ondelete="CASCADE"), nullable=False, index=True)
     request_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    organization_id: Mapped[str] = mapped_column(ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
     team_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
     event_type: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
     status: Mapped[str] = mapped_column(String(64), nullable=False, default="queued")
@@ -197,4 +208,29 @@ class MemoryRecord(Base):
     content: Mapped[str] = mapped_column(Text, nullable=False)
     metadata_payload: Mapped[dict] = mapped_column("metadata", JSON, nullable=False, default=dict)
     embedding: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
+    created_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+
+class Organization(Base):
+    __tablename__ = "organizations"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True, default=lambda: str(uuid.uuid4()))
+    name: Mapped[str] = mapped_column(String(128), nullable=False, unique=True)
+    slug: Mapped[str] = mapped_column(String(128), nullable=False, unique=True)
+    workspace_name: Mapped[str] = mapped_column(String(128), nullable=False, default="")
+    workspace_slug: Mapped[str] = mapped_column(String(128), nullable=False, default="")
+    created_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+
+class Operator(Base):
+    __tablename__ = "operators"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True, default=lambda: str(uuid.uuid4()))
+    organization_id: Mapped[str] = mapped_column(ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
+    name: Mapped[str] = mapped_column(String(128), nullable=False)
+    email: Mapped[str] = mapped_column(String(256), nullable=False, unique=True)
+    role: Mapped[OperatorRole] = mapped_column(Enum(OperatorRole), nullable=False, default=OperatorRole.viewer)
+    api_key: Mapped[str] = mapped_column(String(128), nullable=False, unique=True, index=True)
+    permissions: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     created_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)

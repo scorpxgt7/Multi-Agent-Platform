@@ -79,6 +79,18 @@ textarea {
   flex-wrap: wrap;
 }
 
+.identity-header {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.identity-header select,
+.identity-header input {
+  min-width: 180px;
+}
+
 .app-nav-button,
 .builder-button {
   border: 1px solid #36536f;

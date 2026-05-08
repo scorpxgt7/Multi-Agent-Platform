@@ -10,6 +10,21 @@ DB_PATH = Path(os.environ.get("NEXUS_DB_PATH", DATA_DIR / "nexus-runs.db"))
 LEGACY_JSON_PATH = DATA_DIR / "nexus-runs.json"
 
 
+def ensure_run_columns(connection):
+    existing_columns = {
+        row["name"]
+        for row in connection.execute("PRAGMA table_info(runs)").fetchall()
+    }
+    column_additions = [
+        ("subsystem_id", "TEXT"),
+        ("preset_id", "TEXT"),
+    ]
+
+    for column_name, column_type in column_additions:
+        if column_name not in existing_columns:
+            connection.execute(f"ALTER TABLE runs ADD COLUMN {column_name} {column_type}")
+
+
 def ensure_connection():
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     connection = sqlite3.connect(DB_PATH)
@@ -18,6 +33,8 @@ def ensure_connection():
         """
         CREATE TABLE IF NOT EXISTS runs (
             id TEXT PRIMARY KEY,
+            subsystem_id TEXT,
+            preset_id TEXT,
             runtime_mode TEXT NOT NULL,
             engine TEXT,
             engine_label TEXT,
@@ -38,6 +55,7 @@ def ensure_connection():
         )
         """
     )
+    ensure_run_columns(connection)
     connection.commit()
     return connection
 
@@ -63,6 +81,8 @@ def migrate_legacy_json(connection):
 def normalize_run(run):
     return {
         "id": str(run.get("id")),
+        "subsystemId": run.get("subsystemId", "mission"),
+        "presetId": run.get("presetId"),
         "runtimeMode": run.get("runtimeMode", "backend"),
         "engine": run.get("engine", "local-simulation"),
         "engineLabel": run.get("engineLabel", run.get("engine", "local-simulation")),
@@ -87,14 +107,16 @@ def write_run(connection, run):
     connection.execute(
         """
         INSERT OR REPLACE INTO runs (
-            id, runtime_mode, engine, engine_label, task, time, status,
+            id, subsystem_id, preset_id, runtime_mode, engine, engine_label, task, time, status,
             started_at, completed_at, duration_ms, final_output,
             entries_json, statuses_json, manager_plan, supervisor_brief,
             synthesis, artifacts_json, error_message
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             run["id"],
+            run.get("subsystemId", "mission"),
+            run.get("presetId"),
             run["runtimeMode"],
             run.get("engine"),
             run.get("engineLabel"),
@@ -119,6 +141,8 @@ def write_run(connection, run):
 def row_to_run(row):
     return {
         "id": row["id"],
+        "subsystemId": row["subsystem_id"] or "mission",
+        "presetId": row["preset_id"],
         "runtimeMode": row["runtime_mode"],
         "engine": row["engine"],
         "engineLabel": row["engine_label"],
@@ -143,6 +167,8 @@ def row_to_summary(row):
     artifacts = json.loads(row["artifacts_json"] or "[]")
     return {
         "id": row["id"],
+        "subsystemId": row["subsystem_id"] or "mission",
+        "presetId": row["preset_id"],
         "runtimeMode": row["runtime_mode"],
         "engine": row["engine"],
         "engineLabel": row["engine_label"],

@@ -1,10 +1,12 @@
+import { buildIdentityHeaders } from "../identity/session.js";
+
 const POLICY_API_BASE = (import.meta.env.VITE_REGISTRY_API_BASE || "/registry-api").replace(/\/$/, "");
 
 async function request(path, options = {}) {
   const response = await fetch(`${POLICY_API_BASE}${path}`, {
     headers: {
       "Content-Type": "application/json",
-      ...(options.headers || {}),
+      ...buildIdentityHeaders(options.headers || {}),
     },
     ...options,
   });

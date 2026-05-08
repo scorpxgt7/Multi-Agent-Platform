@@ -1,12 +1,15 @@
-from fastapi import Depends, FastAPI, HTTPException
+import secrets
+
+from fastapi import Depends, FastAPI, HTTPException, Request
 from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
-from shared.models import Agent, AgentSkill, AuditLog, Role, RoleSkill, Team, TeamAgent
-from shared.schemas import AgentCreate, AgentUpdate, RoleCreate, TeamCreate, TeamUpdate
+from shared.models import Agent, AgentSkill, AuditLog, Operator, OperatorRole, Organization, Role, RoleSkill, Team, TeamAgent
+from shared.schemas import AgentCreate, AgentUpdate, OperatorCreate, OperatorUpdate, OrganizationBootstrap, RoleCreate, TeamCreate, TeamUpdate
 from shared.utils.config import load_settings
 from shared.utils.database import create_session_factory
 from shared.utils.events import EventBus
+from shared.utils.security import operator_role_value, require_request_organization, request_scope, role_permissions
 
 settings = load_settings("agent-service", 8102)
 SessionLocal = create_session_factory(settings.database_url)
@@ -47,9 +50,165 @@ def autonomy_value(value):
     return value.value if hasattr(value, "value") else str(value)
 
 
+def serialize_organization(organization: Organization):
+    return {
+        "id": organization.id,
+        "name": organization.name,
+        "slug": organization.slug,
+        "workspace_name": organization.workspace_name,
+        "workspace_slug": organization.workspace_slug,
+    }
+
+
+def serialize_operator(operator: Operator):
+    role = operator_role_value(operator.role)
+    return {
+        "id": operator.id,
+        "organization_id": operator.organization_id,
+        "name": operator.name,
+        "email": operator.email,
+        "role": role,
+        "permissions": sorted(role_permissions(role, operator.permissions)),
+        "is_active": operator.is_active,
+    }
+
+
+def create_operator_record(db: Session, *, organization_id: str, name: str, email: str, role: str, permissions: dict):
+    operator = Operator(
+        organization_id=organization_id,
+        name=name,
+        email=email,
+        role=role,
+        api_key=f"nexus_{secrets.token_urlsafe(24)}",
+        permissions=permissions,
+        is_active=True,
+    )
+    db.add(operator)
+    db.flush()
+    return operator
+
+
+def request_organization_id(request: Request) -> str:
+    return require_request_organization(request)
+
+
 @app.get("/health")
 def health():
     return {"ok": True, "service": settings.service_name}
+
+
+@app.post("/v1/organizations/bootstrap")
+def bootstrap_organization(payload: OrganizationBootstrap, db: Session = Depends(get_db)):
+    existing = db.scalar(select(Organization).where(Organization.slug == payload.organization_slug))
+    if existing:
+        raise HTTPException(status_code=409, detail="organization_slug_exists")
+
+    organization = Organization(
+        name=payload.organization_name,
+        slug=payload.organization_slug,
+        workspace_name=payload.workspace_name or f"{payload.organization_name} Workspace",
+        workspace_slug=payload.workspace_slug or f"{payload.organization_slug}-workspace",
+    )
+    db.add(organization)
+    db.flush()
+    operator = create_operator_record(
+        db,
+        organization_id=organization.id,
+        name=payload.operator_name,
+        email=payload.operator_email,
+        role=OperatorRole.admin.value,
+        permissions={},
+    )
+    db.add(
+        AuditLog(
+            event_type="organization.bootstrapped",
+            actor_type="service",
+            actor_id=settings.service_name,
+            resource_type="organization",
+            resource_id=organization.id,
+            payload={"operator_id": operator.id},
+        )
+    )
+    db.commit()
+    events.emit("organization.bootstrapped", {"organization_id": organization.id, "operator_id": operator.id})
+    return {"ok": True, "organization": serialize_organization(organization), "operator": serialize_operator(operator), "api_key": operator.api_key}
+
+
+@app.get("/v1/organizations")
+def list_organizations(db: Session = Depends(get_db)):
+    organizations = db.scalars(select(Organization).order_by(Organization.created_at.asc())).all()
+    return {"ok": True, "organizations": [serialize_organization(item) for item in organizations]}
+
+
+@app.get("/internal/operators/resolve")
+def resolve_operator(api_key: str, db: Session = Depends(get_db)):
+    operator = db.scalar(select(Operator).where(Operator.api_key == api_key))
+    if not operator or not operator.is_active:
+        raise HTTPException(status_code=401, detail="invalid_api_key")
+    organization = db.get(Organization, operator.organization_id)
+    return {"ok": True, "operator": serialize_operator(operator), "organization": serialize_organization(organization) if organization else None}
+
+
+@app.post("/v1/operators")
+def create_operator(payload: OperatorCreate, request: Request, db: Session = Depends(get_db)):
+    organization_id = request_organization_id(request)
+    existing = db.scalar(select(Operator).where(Operator.email == payload.email))
+    if existing:
+        raise HTTPException(status_code=409, detail="operator_email_exists")
+    operator = create_operator_record(
+        db,
+        organization_id=organization_id,
+        name=payload.name,
+        email=payload.email,
+        role=payload.role,
+        permissions=payload.permissions,
+    )
+    db.add(
+        AuditLog(
+            event_type="operator.created",
+            actor_type="operator",
+            actor_id=request_scope(request)["operator_id"] or "system",
+            resource_type="operator",
+            resource_id=operator.id,
+            payload={"organization_id": organization_id, "role": payload.role},
+        )
+    )
+    db.commit()
+    events.emit("operator.created", {"organization_id": organization_id, "operator_id": operator.id})
+    return {"ok": True, "operator": serialize_operator(operator), "api_key": operator.api_key}
+
+
+@app.get("/v1/operators")
+def list_operators(request: Request, db: Session = Depends(get_db)):
+    organization_id = request_organization_id(request)
+    operators = db.scalars(select(Operator).where(Operator.organization_id == organization_id).order_by(Operator.created_at.asc())).all()
+    return {"ok": True, "operators": [serialize_operator(item) for item in operators]}
+
+
+@app.put("/v1/operators/{operator_id}")
+def update_operator(operator_id: str, payload: OperatorUpdate, request: Request, db: Session = Depends(get_db)):
+    organization_id = request_organization_id(request)
+    operator = db.get(Operator, operator_id)
+    if not operator or operator.organization_id != organization_id:
+        raise HTTPException(status_code=404, detail="operator_not_found")
+    operator.name = payload.name
+    operator.email = payload.email
+    operator.role = payload.role
+    operator.permissions = payload.permissions
+    operator.is_active = payload.is_active
+    db.add(
+        AuditLog(
+            event_type="operator.updated",
+            actor_type="operator",
+            actor_id=request_scope(request)["operator_id"] or "system",
+            resource_type="operator",
+            resource_id=operator.id,
+            payload={"organization_id": organization_id, "role": payload.role, "is_active": payload.is_active},
+        )
+    )
+    db.commit()
+    events.emit("operator.updated", {"organization_id": organization_id, "operator_id": operator.id})
+    return {"ok": True, "operator": serialize_operator(operator)}
 
 
 @app.post("/v1/roles")
@@ -102,8 +261,10 @@ def list_roles(db: Session = Depends(get_db)):
 
 
 @app.post("/v1/agents")
-def create_agent(payload: AgentCreate, db: Session = Depends(get_db)):
+def create_agent(payload: AgentCreate, request: Request, db: Session = Depends(get_db)):
+    organization_id = request_organization_id(request)
     agent = Agent(
+        organization_id=organization_id,
         name=payload.name,
         role_id=payload.role_id,
         autonomy_level=payload.autonomy_level,
@@ -118,21 +279,31 @@ def create_agent(payload: AgentCreate, db: Session = Depends(get_db)):
     db.add(
         AuditLog(
             event_type="agent.created",
-            actor_type="service",
-            actor_id=settings.service_name,
+            actor_type="operator",
+            actor_id=request_scope(request)["operator_id"] or settings.service_name,
             resource_type="agent",
             resource_id=agent.id,
-            payload={"role_id": agent.role_id},
+            payload={"role_id": agent.role_id, "organization_id": organization_id},
         )
     )
     db.commit()
-    events.emit("agent.created", {"agent_id": agent.id, "role_id": agent.role_id})
-    return {"ok": True, "agent": {"id": agent.id, "name": agent.name, "role_id": agent.role_id, "autonomy_level": autonomy_value(agent.autonomy_level)}}
+    events.emit("agent.created", {"agent_id": agent.id, "role_id": agent.role_id, "organization_id": organization_id})
+    return {
+        "ok": True,
+        "agent": {
+            "id": agent.id,
+            "organization_id": organization_id,
+            "name": agent.name,
+            "role_id": agent.role_id,
+            "autonomy_level": autonomy_value(agent.autonomy_level),
+        },
+    }
 
 
 @app.get("/v1/agents")
-def list_agents(db: Session = Depends(get_db)):
-    agents = db.scalars(select(Agent).order_by(Agent.created_at.asc())).all()
+def list_agents(request: Request, db: Session = Depends(get_db)):
+    organization_id = request_organization_id(request)
+    agents = db.scalars(select(Agent).where(Agent.organization_id == organization_id).order_by(Agent.created_at.asc())).all()
     roles = {role.id: role for role in db.scalars(select(Role)).all()}
     skills_by_agent = agent_skill_map(db, [agent.id for agent in agents])
     return {
@@ -140,6 +311,7 @@ def list_agents(db: Session = Depends(get_db)):
         "agents": [
             {
                 "id": agent.id,
+                "organization_id": organization_id,
                 "name": agent.name,
                 "role_id": agent.role_id,
                 "role_name": roles.get(agent.role_id).name if roles.get(agent.role_id) else "",
@@ -155,9 +327,10 @@ def list_agents(db: Session = Depends(get_db)):
 
 
 @app.put("/v1/agents/{agent_id}")
-def update_agent(agent_id: str, payload: AgentUpdate, db: Session = Depends(get_db)):
+def update_agent(agent_id: str, payload: AgentUpdate, request: Request, db: Session = Depends(get_db)):
+    organization_id = request_organization_id(request)
     agent = db.get(Agent, agent_id)
-    if not agent:
+    if not agent or agent.organization_id != organization_id:
         raise HTTPException(status_code=404, detail="agent_not_found")
 
     agent.name = payload.name
@@ -175,21 +348,31 @@ def update_agent(agent_id: str, payload: AgentUpdate, db: Session = Depends(get_
     db.add(
         AuditLog(
             event_type="agent.updated",
-            actor_type="service",
-            actor_id=settings.service_name,
+            actor_type="operator",
+            actor_id=request_scope(request)["operator_id"] or settings.service_name,
             resource_type="agent",
             resource_id=agent.id,
-            payload={"role_id": agent.role_id, "skill_ids": payload.skill_ids},
+            payload={"role_id": agent.role_id, "skill_ids": payload.skill_ids, "organization_id": organization_id},
         )
     )
     db.commit()
-    events.emit("agent.updated", {"agent_id": agent.id, "role_id": agent.role_id})
-    return {"ok": True, "agent": {"id": agent.id, "name": agent.name, "role_id": agent.role_id, "autonomy_level": autonomy_value(agent.autonomy_level)}}
+    events.emit("agent.updated", {"agent_id": agent.id, "role_id": agent.role_id, "organization_id": organization_id})
+    return {
+        "ok": True,
+        "agent": {
+            "id": agent.id,
+            "organization_id": organization_id,
+            "name": agent.name,
+            "role_id": agent.role_id,
+            "autonomy_level": autonomy_value(agent.autonomy_level),
+        },
+    }
 
 
 @app.post("/v1/teams")
-def create_team(payload: TeamCreate, db: Session = Depends(get_db)):
-    team = Team(name=payload.name, description=payload.description, governance_config=payload.governance_config)
+def create_team(payload: TeamCreate, request: Request, db: Session = Depends(get_db)):
+    organization_id = request_organization_id(request)
+    team = Team(organization_id=organization_id, name=payload.name, description=payload.description, governance_config=payload.governance_config)
     db.add(team)
     db.flush()
     for index, agent_id in enumerate(payload.agent_ids, start=1):
@@ -197,28 +380,30 @@ def create_team(payload: TeamCreate, db: Session = Depends(get_db)):
     db.add(
         AuditLog(
             event_type="team.created",
-            actor_type="service",
-            actor_id=settings.service_name,
+            actor_type="operator",
+            actor_id=request_scope(request)["operator_id"] or settings.service_name,
             resource_type="team",
             resource_id=team.id,
-            payload={"agent_ids": payload.agent_ids},
+            payload={"agent_ids": payload.agent_ids, "organization_id": organization_id},
         )
     )
     db.commit()
-    events.emit("team.created", {"team_id": team.id, "agent_ids": payload.agent_ids})
-    return {"ok": True, "team": {"id": team.id, "name": team.name, "agent_count": len(payload.agent_ids)}}
+    events.emit("team.created", {"team_id": team.id, "agent_ids": payload.agent_ids, "organization_id": organization_id})
+    return {"ok": True, "team": {"id": team.id, "organization_id": organization_id, "name": team.name, "agent_count": len(payload.agent_ids)}}
 
 
 @app.get("/v1/teams/{team_id}")
-def get_team(team_id: str, db: Session = Depends(get_db)):
+def get_team(team_id: str, request: Request, db: Session = Depends(get_db)):
+    organization_id = request_organization_id(request)
     team = db.get(Team, team_id)
-    if not team:
+    if not team or team.organization_id != organization_id:
         return {"ok": False, "error": "team_not_found"}
     team_agents = db.scalars(select(TeamAgent).where(TeamAgent.team_id == team_id).order_by(TeamAgent.priority.asc())).all()
     return {
         "ok": True,
         "team": {
             "id": team.id,
+            "organization_id": organization_id,
             "name": team.name,
             "description": team.description,
             "agent_ids": [item.agent_id for item in team_agents],
@@ -228,14 +413,16 @@ def get_team(team_id: str, db: Session = Depends(get_db)):
 
 
 @app.get("/v1/teams")
-def list_teams(db: Session = Depends(get_db)):
-    teams = db.scalars(select(Team).order_by(Team.created_at.asc())).all()
+def list_teams(request: Request, db: Session = Depends(get_db)):
+    organization_id = request_organization_id(request)
+    teams = db.scalars(select(Team).where(Team.organization_id == organization_id).order_by(Team.created_at.asc())).all()
     agents_by_team = team_agent_map(db, [team.id for team in teams])
     return {
         "ok": True,
         "teams": [
             {
                 "id": team.id,
+                "organization_id": organization_id,
                 "name": team.name,
                 "description": team.description,
                 "governance_config": team.governance_config,
@@ -247,9 +434,10 @@ def list_teams(db: Session = Depends(get_db)):
 
 
 @app.put("/v1/teams/{team_id}")
-def update_team(team_id: str, payload: TeamUpdate, db: Session = Depends(get_db)):
+def update_team(team_id: str, payload: TeamUpdate, request: Request, db: Session = Depends(get_db)):
+    organization_id = request_organization_id(request)
     team = db.get(Team, team_id)
-    if not team:
+    if not team or team.organization_id != organization_id:
         raise HTTPException(status_code=404, detail="team_not_found")
 
     team.name = payload.name
@@ -264,13 +452,13 @@ def update_team(team_id: str, payload: TeamUpdate, db: Session = Depends(get_db)
     db.add(
         AuditLog(
             event_type="team.updated",
-            actor_type="service",
-            actor_id=settings.service_name,
+            actor_type="operator",
+            actor_id=request_scope(request)["operator_id"] or settings.service_name,
             resource_type="team",
             resource_id=team.id,
-            payload={"agent_ids": payload.agent_ids, "delegation_targets": payload.governance_config.get("delegation_targets", [])},
+            payload={"agent_ids": payload.agent_ids, "delegation_targets": payload.governance_config.get("delegation_targets", []), "organization_id": organization_id},
         )
     )
     db.commit()
-    events.emit("team.updated", {"team_id": team.id, "agent_ids": payload.agent_ids})
-    return {"ok": True, "team": {"id": team.id, "name": team.name, "agent_count": len(payload.agent_ids)}}
+    events.emit("team.updated", {"team_id": team.id, "agent_ids": payload.agent_ids, "organization_id": organization_id})
+    return {"ok": True, "team": {"id": team.id, "organization_id": organization_id, "name": team.name, "agent_count": len(payload.agent_ids)}}

@@ -8,6 +8,30 @@ function isOptionalString(value) {
   return value == null || typeof value === "string";
 }
 
+function validateOptionalIdentifier(value, field, issues) {
+  if (value == null || value === "") {
+    return null;
+  }
+
+  if (typeof value !== "string") {
+    issues.push({ field, message: "Value must be a string when provided." });
+    return null;
+  }
+
+  const trimmed = value.trim();
+  if (!trimmed) {
+    issues.push({ field, message: "Value cannot be empty when provided." });
+    return null;
+  }
+
+  if (trimmed.length > 80) {
+    issues.push({ field, message: "Value is too long." });
+    return null;
+  }
+
+  return trimmed;
+}
+
 function validateAgent(agent, index) {
   const prefix = `agents[${index}]`;
   const issues = [];
@@ -46,6 +70,8 @@ export function validateRunPayload(payload, availableEngines) {
   const requestedEngineId = typeof payload?.engine === "string" && payload.engine.trim()
     ? payload.engine.trim()
     : null;
+  const subsystemId = validateOptionalIdentifier(payload?.subsystemId, "subsystemId", issues);
+  const presetId = validateOptionalIdentifier(payload?.presetId, "presetId", issues);
 
   if (!task) {
     issues.push({ field: "task", message: "Task is required." });
@@ -80,5 +106,7 @@ export function validateRunPayload(payload, availableEngines) {
     task,
     agents,
     requestedEngineId,
+    subsystemId,
+    presetId,
   };
 }
