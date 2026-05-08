@@ -252,15 +252,95 @@ def main():
         if viewer_policy_create.status_code != 403:
             raise RuntimeError("viewer was allowed to create a policy")
 
+        head_admin_node_id = "agent-head-admin"
+        finance_agent_node_id = f"agent-{agent_a['agent']['id']}"
+        skill_node_id = f"skill-{skill['id']}"
+        policy_node_id = f"policy-{delegation_policy['policy']['id']}"
+        approval_node_id = f"approval-{team_a['team']['id']}"
+        provider_node_id = "provider-openai"
+
+        workflow_graph = {
+            "workflow": {
+                "name": f"Validation Workflow {suffix}",
+                "version": 1,
+                "status": "draft",
+                "subsystem": "admin",
+                "team_id": team_a["team"]["id"],
+            },
+            "nodes": [
+                {"id": head_admin_node_id, "type": "agent", "position": {"x": 80, "y": 120}, "data": {"label": "Head Admin", "role": "Head Admin", "provider": "policy-driven", "memoryProfile": "organization", "skills": [], "runtimeStatus": "ready"}},
+                {"id": finance_agent_node_id, "type": "agent", "position": {"x": 300, "y": 120}, "data": {"label": agent_a["agent"]["name"], "role": "Finance Role", "provider": "openai", "memoryProfile": "team", "skills": [skill["slug"]], "runtimeStatus": "ready"}},
+                {"id": skill_node_id, "type": "skill", "position": {"x": 560, "y": 120}, "data": {"label": skill["name"], "executionType": "hybrid", "provider": "openai", "inputSchema": {}, "outputSchema": {}, "permissions": [], "retryPolicy": "standard", "timeout": "60s", "runtimeStatus": "ready"}},
+                {"id": policy_node_id, "type": "policy", "position": {"x": 40, "y": 320}, "data": {"label": delegation_policy["policy"]["name"], "effect": "deny", "scope": "organization", "approvalThreshold": 0.75, "restrictions": {"delegation_targets": [agent_a["agent"]["id"]], "skill_ids": [skill["id"]]}}},
+                {"id": approval_node_id, "type": "approval", "position": {"x": 300, "y": 320}, "data": {"label": f"{team_a['team']['name']} Approval", "status": "required", "agentIds": [agent_a["agent"]["id"]], "delegationTargets": [agent_a["agent"]["id"]], "riskScore": 0.25}},
+                {"id": provider_node_id, "type": "provider", "position": {"x": 760, "y": 80}, "data": {"label": "OpenAI", "provider": "openai", "model": "gpt-4.1-mini", "status": "available"}},
+            ],
+            "edges": [
+                {"id": f"{head_admin_node_id}->{finance_agent_node_id}", "source": head_admin_node_id, "target": finance_agent_node_id, "type": "delegation", "data": {"edgeType": "delegation"}},
+                {"id": f"{finance_agent_node_id}->{skill_node_id}", "source": finance_agent_node_id, "target": skill_node_id, "type": "execution", "data": {"edgeType": "execution"}},
+                {"id": f"{head_admin_node_id}->{approval_node_id}", "source": head_admin_node_id, "target": approval_node_id, "type": "approval", "data": {"edgeType": "approval"}},
+                {"id": f"{policy_node_id}->{finance_agent_node_id}", "source": policy_node_id, "target": finance_agent_node_id, "type": "policy", "data": {"edgeType": "policy"}},
+                {"id": f"{policy_node_id}->{skill_node_id}", "source": policy_node_id, "target": skill_node_id, "type": "policy", "data": {"edgeType": "policy"}},
+                {"id": f"{provider_node_id}->{finance_agent_node_id}", "source": provider_node_id, "target": finance_agent_node_id, "type": "fallback", "data": {"edgeType": "fallback"}},
+            ],
+            "validation": [],
+            "runtime": {},
+        }
+
+        invalid_graph = json.loads(json.dumps(workflow_graph))
+        invalid_graph["edges"] = [edge for edge in invalid_graph["edges"] if edge["type"] != "delegation"]
+        invalid_validation = require_ok(
+            client.post(f"{gateway_url}/v1/workflows/validate", headers=auth_headers(admin_a_key), json={"workflow": invalid_graph}),
+            "invalid workflow validation failed",
+        )
+        if invalid_validation.get("validation_status") != "invalid":
+            raise RuntimeError("invalid graph was not flagged during validation")
+        invalid_deploy = client.post(f"{gateway_url}/v1/workflows/deploy", headers=auth_headers(admin_a_key), json={"workflow": invalid_graph})
+        if invalid_deploy.status_code != 422:
+            raise RuntimeError("invalid graph was not rejected during deployment")
+
+        workflow_validation = require_ok(
+            client.post(f"{gateway_url}/v1/workflows/validate", headers=auth_headers(admin_a_key), json={"workflow": workflow_graph}),
+            "workflow validation failed",
+        )
+        if workflow_validation.get("validation_status") != "valid":
+            raise RuntimeError("valid workflow was not marked valid")
+
+        deploy_v1 = require_ok(
+            client.post(f"{gateway_url}/v1/workflows/deploy", headers=auth_headers(admin_a_key), json={"workflow": workflow_graph}),
+            "workflow deployment v1 failed",
+        )
+        deploy_v1_id = deploy_v1["deployment"]["id"]
+        workflow_graph_v2 = json.loads(json.dumps(workflow_graph))
+        workflow_graph_v2["workflow"]["name"] = f"Validation Workflow {suffix} v2"
+        deploy_v2 = require_ok(
+            client.post(f"{gateway_url}/v1/workflows/deploy", headers=auth_headers(admin_a_key), json={"workflow": workflow_graph_v2}),
+            "workflow deployment v2 failed",
+        )
+        deploy_v2_id = deploy_v2["deployment"]["id"]
+
+        versions_payload = require_ok(client.get(f"{gateway_url}/v1/workflows/versions", headers=auth_headers(admin_a_key)), "workflow versions failed")
+        active_versions = [item for item in versions_payload["versions"] if item["status"] == "active"]
+        if len(active_versions) != 1 or active_versions[0]["id"] != deploy_v2_id:
+            raise RuntimeError("workflow deployment did not activate the latest version")
+
+        rollback_payload = require_ok(
+            client.post(f"{gateway_url}/v1/workflows/{deploy_v1_id}/rollback", headers=auth_headers(admin_a_key)),
+            "workflow rollback failed",
+        )
+        if rollback_payload["deployment"]["id"] != deploy_v1_id:
+            raise RuntimeError("workflow rollback did not restore the previous deployment")
+        active_workflow = require_ok(client.get(f"{gateway_url}/v1/workflows/active", headers=auth_headers(admin_a_key)), "active workflow lookup failed")
+        if active_workflow["deployment"]["id"] != deploy_v1_id:
+            raise RuntimeError("active workflow did not match rolled back deployment")
+
         task_payload = {
             "team_id": team_a["team"]["id"],
             "task": "Review Q3 operating budget variance and recommend approval status.",
             "actor_id": "head-admin",
             "subsystem": "admin",
             "context": {
-                "skill_id": skill["id"],
                 "role_id": role["id"],
-                "default_skill_id": skill["id"],
             },
         }
         valid_result = require_ok(client.post(f"{gateway_url}/v1/tasks", headers=auth_headers(admin_a_key), json=task_payload), "valid orchestration flow failed")

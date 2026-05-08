@@ -22,6 +22,7 @@ ROUTES = {
     "policies": POLICY_SERVICE_BASE + "/v1/policies",
     "tasks": ORCHESTRATOR_SERVICE_BASE + "/v1/tasks",
     "executions": ORCHESTRATOR_SERVICE_BASE + "/v1/executions",
+    "workflows": ORCHESTRATOR_SERVICE_BASE + "/v1/workflows",
 }
 
 
@@ -215,3 +216,33 @@ async def get_execution(request_id: str, request: Request):
 async def get_execution_status(request_id: str, request: Request):
     identity = await resolve_identity(request, required_permission="execution:view")
     return await forward("GET", f"{ROUTES['executions']}/{request_id}/status", identity=identity)
+
+
+@app.get("/v1/workflows/active")
+async def get_active_workflow(request: Request):
+    identity = await resolve_identity(request, required_permission="registry:view")
+    return await forward("GET", f"{ROUTES['workflows']}/active", identity=identity)
+
+
+@app.post("/v1/workflows/validate")
+async def validate_workflow(payload: dict[str, Any], request: Request):
+    identity = await resolve_identity(request, required_permission="registry:manage")
+    return await forward("POST", f"{ROUTES['workflows']}/validate", identity=identity, payload=payload)
+
+
+@app.post("/v1/workflows/deploy")
+async def deploy_workflow(payload: dict[str, Any], request: Request):
+    identity = await resolve_identity(request, required_permission="registry:manage")
+    return await forward("POST", f"{ROUTES['workflows']}/deploy", identity=identity, payload=payload)
+
+
+@app.get("/v1/workflows/versions")
+async def list_workflow_versions(request: Request):
+    identity = await resolve_identity(request, required_permission="registry:view")
+    return await forward("GET", f"{ROUTES['workflows']}/versions", identity=identity)
+
+
+@app.post("/v1/workflows/{deployment_id}/rollback")
+async def rollback_workflow(deployment_id: str, request: Request):
+    identity = await resolve_identity(request, required_permission="registry:manage")
+    return await forward("POST", f"{ROUTES['workflows']}/{deployment_id}/rollback", identity=identity)

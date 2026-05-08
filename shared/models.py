@@ -234,3 +234,63 @@ class Operator(Base):
     permissions: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     created_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+
+class WorkflowDefinition(Base):
+    __tablename__ = "workflow_definitions"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True, default=lambda: str(uuid.uuid4()))
+    organization_id: Mapped[str] = mapped_column(ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
+    name: Mapped[str] = mapped_column(String(160), nullable=False)
+    version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="draft")
+    created_by: Mapped[str] = mapped_column(String(128), nullable=False, default="system")
+    compiled_definition: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    runtime_config: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    created_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+
+
+class WorkflowNode(Base):
+    __tablename__ = "workflow_nodes"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True, default=lambda: str(uuid.uuid4()))
+    workflow_definition_id: Mapped[str] = mapped_column(ForeignKey("workflow_definitions.id", ondelete="CASCADE"), nullable=False, index=True)
+    node_id: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
+    node_type: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    label: Mapped[str] = mapped_column(String(160), nullable=False, default="")
+    config_json: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    position_x: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    position_y: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    created_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+
+class WorkflowEdge(Base):
+    __tablename__ = "workflow_edges"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True, default=lambda: str(uuid.uuid4()))
+    workflow_definition_id: Mapped[str] = mapped_column(ForeignKey("workflow_definitions.id", ondelete="CASCADE"), nullable=False, index=True)
+    edge_id: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
+    source_node: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
+    target_node: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
+    edge_type: Mapped[str] = mapped_column(String(64), nullable=False, default="delegation")
+    condition_json: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    created_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+
+class WorkflowDeployment(Base):
+    __tablename__ = "workflow_deployments"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True, default=lambda: str(uuid.uuid4()))
+    organization_id: Mapped[str] = mapped_column(ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
+    workflow_definition_id: Mapped[str] = mapped_column(ForeignKey("workflow_definitions.id", ondelete="CASCADE"), nullable=False, index=True)
+    version: Mapped[int] = mapped_column(Integer, nullable=False, default=1, index=True)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="inactive", index=True)
+    validation_status: Mapped[str] = mapped_column(String(32), nullable=False, default="pending")
+    validation_details: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    compiled_definition: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    runtime_config: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    deployed_at: Mapped[DateTime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    rolled_back_from_deployment_id: Mapped[str] = mapped_column(String(64), nullable=False, default="")
+    created_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)

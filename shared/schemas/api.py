@@ -144,3 +144,38 @@ class MemorySearch(BaseModel):
     query: str
     top_k: int = 5
     metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class WorkflowNodePayload(BaseModel):
+    id: str
+    type: str
+    position: dict[str, float] = Field(default_factory=dict)
+    data: dict[str, Any] = Field(default_factory=dict)
+
+
+class WorkflowEdgePayload(BaseModel):
+    id: str
+    source: str
+    target: str
+    type: str = "delegation"
+    data: dict[str, Any] = Field(default_factory=dict)
+
+
+class WorkflowPayload(BaseModel):
+    workflow: dict[str, Any] = Field(default_factory=dict)
+    nodes: list[WorkflowNodePayload] = Field(default_factory=list)
+    edges: list[WorkflowEdgePayload] = Field(default_factory=list)
+    validation: list[dict[str, Any]] = Field(default_factory=list)
+    runtime: dict[str, Any] = Field(default_factory=dict)
+
+
+class WorkflowValidateRequest(BaseModel):
+    workflow: WorkflowPayload
+
+
+class WorkflowDeployRequest(BaseModel):
+    workflow: WorkflowPayload
+
+
+class WorkflowRollbackRequest(BaseModel):
+    deployment_id: str

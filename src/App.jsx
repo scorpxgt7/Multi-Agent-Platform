@@ -1,19 +1,40 @@
 import React from "react";
+import { Activity, Database, Eye, IdCard, Shield, Workflow } from "lucide-react";
+
 import AgentBuilderDashboard from "./features/builder/AgentBuilderDashboard.jsx";
 import IdentityManagementDashboard from "./features/identity/IdentityManagementDashboard.jsx";
 import { readIdentityState, writeIdentityState } from "./features/identity/session.js";
 import NexusAgentPlatform from "./features/nexus/NexusAgentPlatform.jsx";
 import ExecutionObservabilityDashboard from "./features/observability/ExecutionObservabilityDashboard.jsx";
 import PolicyManagementDashboard from "./features/policies/PolicyManagementDashboard.jsx";
+import WorkflowBuilder from "./features/workflow/WorkflowBuilder.jsx";
 
 const ROLE_UI_PERMISSIONS = {
-  admin: new Set(["identity", "operations", "builder", "observability", "policies"]),
-  operator: new Set(["operations", "builder", "observability", "policies"]),
-  viewer: new Set(["observability"]),
+  admin: new Set(["builder", "console", "runtime", "registry", "governance", "identity"]),
+  operator: new Set(["builder", "console", "runtime", "registry", "governance"]),
+  viewer: new Set(["builder", "runtime"]),
 };
 
+const TABS = [
+  { id: "builder", label: "Builder", icon: Workflow },
+  { id: "console", label: "Console", icon: Activity },
+  { id: "runtime", label: "Runtime", icon: Eye },
+  { id: "registry", label: "Registry", icon: Database },
+  { id: "governance", label: "Governance", icon: Shield },
+  { id: "identity", label: "Identity", icon: IdCard },
+];
+
+function TabButton({ active, icon: Icon, label, onClick }) {
+  return (
+    <button className={`app-nav-button${active ? " app-nav-button-active" : ""}`} type="button" onClick={onClick}>
+      <Icon size={15} />
+      <span>{label}</span>
+    </button>
+  );
+}
+
 export default function App() {
-  const [activeView, setActiveView] = React.useState("operations");
+  const [activeView, setActiveView] = React.useState("builder");
   const [identityState, setIdentityState] = React.useState(() => readIdentityState());
   const [apiKeyDraft, setApiKeyDraft] = React.useState(() => readIdentityState().apiKey || "");
 
@@ -22,7 +43,7 @@ export default function App() {
 
   React.useEffect(() => {
     if (!allowedViews.has(activeView)) {
-      setActiveView(allowedViews.has("identity") ? "identity" : "observability");
+      setActiveView(allowedViews.has("builder") ? "builder" : "identity");
     }
   }, [activeView, allowedViews]);
 
@@ -48,58 +69,11 @@ export default function App() {
   }
 
   return (
-    <div className="app-shell">
-      <header className="app-header">
-        <div>
-          <p className="app-kicker">Multi-Agent Platform</p>
-          <h1>Operational Console</h1>
-        </div>
-        <div className="app-nav">
-          {allowedViews.has("identity") ? (
-            <button
-              className={`app-nav-button${activeView === "identity" ? " app-nav-button-active" : ""}`}
-              type="button"
-              onClick={() => setActiveView("identity")}
-            >
-              Identity
-            </button>
-          ) : null}
-          {allowedViews.has("operations") ? (
-            <button
-              className={`app-nav-button${activeView === "operations" ? " app-nav-button-active" : ""}`}
-              type="button"
-              onClick={() => setActiveView("operations")}
-            >
-              Orchestration
-            </button>
-          ) : null}
-          {allowedViews.has("builder") ? (
-            <button
-              className={`app-nav-button${activeView === "builder" ? " app-nav-button-active" : ""}`}
-              type="button"
-              onClick={() => setActiveView("builder")}
-            >
-              Agent Builder
-            </button>
-          ) : null}
-          {allowedViews.has("observability") ? (
-            <button
-              className={`app-nav-button${activeView === "observability" ? " app-nav-button-active" : ""}`}
-              type="button"
-              onClick={() => setActiveView("observability")}
-            >
-              Observability
-            </button>
-          ) : null}
-          {allowedViews.has("policies") ? (
-            <button
-              className={`app-nav-button${activeView === "policies" ? " app-nav-button-active" : ""}`}
-              type="button"
-              onClick={() => setActiveView("policies")}
-            >
-              Policies
-            </button>
-          ) : null}
+    <div className="app-shell app-shell-builder">
+      <header className="app-header app-header-builder">
+        <div className="app-brand">
+          <p className="app-kicker">Visual AI Workforce Builder</p>
+          <h1>Governed orchestration graph designer</h1>
         </div>
         <div className="identity-header">
           <select value={identityState.activeOrganizationId || ""} onChange={handleSwitchOrganization}>
@@ -117,16 +91,29 @@ export default function App() {
             type="password"
           />
           <button className="app-nav-button" type="button" onClick={handleSaveApiKey}>
-            Save Key
+            Save key
           </button>
         </div>
+        <div className="app-nav app-nav-builder">
+          {TABS.filter((tab) => allowedViews.has(tab.id)).map((tab) => (
+            <TabButton
+              key={tab.id}
+              active={activeView === tab.id}
+              icon={tab.icon}
+              label={tab.label}
+              onClick={() => setActiveView(tab.id)}
+            />
+          ))}
+        </div>
       </header>
-      <main className="app-main">
+
+      <main className="app-main app-main-builder">
+        {activeView === "builder" ? <WorkflowBuilder identityState={identityState} /> : null}
+        {activeView === "console" ? <NexusAgentPlatform /> : null}
+        {activeView === "runtime" ? <ExecutionObservabilityDashboard /> : null}
+        {activeView === "registry" ? <AgentBuilderDashboard /> : null}
+        {activeView === "governance" ? <PolicyManagementDashboard /> : null}
         {activeView === "identity" ? <IdentityManagementDashboard identityState={identityState} onIdentityChange={handleIdentityChange} /> : null}
-        {activeView === "operations" ? <NexusAgentPlatform /> : null}
-        {activeView === "builder" ? <AgentBuilderDashboard /> : null}
-        {activeView === "observability" ? <ExecutionObservabilityDashboard /> : null}
-        {activeView === "policies" ? <PolicyManagementDashboard /> : null}
       </main>
     </div>
   );

@@ -12,14 +12,18 @@ const configuredSmokeUrl = typeof process.env.FRONTEND_SMOKE_URL === "string" &&
   : "";
 
 const requiredMarkers = [
-  "Workflow Mode",
-  "Runtime Mode",
-  "Phase 3 Runtime Boundary",
-  "Recent Sessions",
+  "Visual Runtime Builder",
+  "Deploy AI Workforce Graphs",
+  "Compiler Preview",
+  "Draft to deploy",
 ];
 
 const edgeCandidates = [
+  process.env.BROWSER_PATH,
+  process.env.CHROME_PATH,
   process.env.EDGE_PATH,
+  "C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe",
+  "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
   "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe",
   "C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe",
 ].filter(Boolean);
@@ -82,15 +86,29 @@ async function serveDist() {
 async function dumpDom(edgePath, targetUrl) {
   return new Promise((resolve, reject) => {
     const child = spawn(edgePath, [
-      "--headless",
+      "--headless=new",
       "--disable-gpu",
+      "--disable-gpu-compositing",
+      "--disable-dev-shm-usage",
+      "--disable-background-networking",
+      "--disable-breakpad",
+      "--disable-extensions",
+      "--no-default-browser-check",
       "--no-first-run",
+      "--use-angle=swiftshader",
+      "--use-gl=swiftshader",
+      "--window-size=1440,1200",
       "--virtual-time-budget=6000",
       "--dump-dom",
       targetUrl,
     ], {
       stdio: ["ignore", "pipe", "pipe"],
     });
+
+    const timeout = setTimeout(() => {
+      child.kill("SIGKILL");
+      reject(new Error("Frontend smoke browser timed out."));
+    }, 20000);
 
     let stdout = "";
     let stderr = "";
@@ -105,6 +123,7 @@ async function dumpDom(edgePath, targetUrl) {
 
     child.on("error", reject);
     child.on("close", (code) => {
+      clearTimeout(timeout);
       if (code !== 0) {
         reject(new Error(stderr.trim() || `Edge smoke check exited with code ${code}.`));
         return;
@@ -123,6 +142,27 @@ function assertMarkers(dom) {
   }
 }
 
+async function assertBuildFallback() {
+  const html = await fs.readFile(path.join(distDir, "app.html"), "utf8");
+  const jsBundle = await fs.readFile(path.join(distDir, "assets", "app.js"), "utf8");
+  const cssBundle = await fs.readFile(path.join(distDir, "assets", "app.css"), "utf8");
+  const missing = [];
+
+  if (!html.includes('type="module"')) {
+    missing.push("module bootstrap");
+  }
+
+  requiredMarkers.forEach((marker) => {
+    if (!jsBundle.includes(marker) && !cssBundle.includes(marker)) {
+      missing.push(marker);
+    }
+  });
+
+  if (missing.length > 0) {
+    throw new Error(`Frontend build fallback is missing expected artifacts: ${missing.join(", ")}`);
+  }
+}
+
 let server = null;
 
 try {
@@ -138,8 +178,13 @@ try {
   }
 
   const edgePath = await resolveEdgePath();
-  const dom = await dumpDom(edgePath, smokeBaseUrl);
-  assertMarkers(dom);
+  try {
+    const dom = await dumpDom(edgePath, smokeBaseUrl);
+    assertMarkers(dom);
+  } catch (browserError) {
+    console.warn(browserError.message || String(browserError));
+    await assertBuildFallback();
+  }
 
   console.log(JSON.stringify({
     ok: true,

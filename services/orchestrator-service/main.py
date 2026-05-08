@@ -9,6 +9,8 @@ from shared.utils.config import load_settings
 from shared.utils.database import create_session_factory
 from shared.utils.events import EventBus
 from shared.utils.security import require_request_organization, request_scope
+from workflow_compiler import compile_workflow
+from workflow_store import WorkflowStore
 
 try:
     from langgraph.graph import END, StateGraph
@@ -20,6 +22,7 @@ settings = load_settings("orchestrator-service", 8105)
 events = EventBus(settings.redis_url, settings.event_channel)
 SessionLocal = create_session_factory(settings.database_url)
 execution_store = ExecutionStore(SessionLocal)
+workflow_store = WorkflowStore(SessionLocal)
 app = FastAPI(title="orchestrator-service", version="1.0.0")
 
 AGENT_SERVICE_URL = "http://agent-service:8102"
@@ -47,6 +50,8 @@ class WorkflowState(TypedDict, total=False):
     provider_usage: list[dict[str, Any]]
     skill_execution_count: int
     policy_violation: dict[str, Any]
+    workflow: dict[str, Any]
+    workflow_deployment: dict[str, Any]
 
 
 def transition(state: WorkflowState, *, status: str, step: str, event_type: str, agent_name: str = "", payload: dict[str, Any] | None = None):
@@ -89,6 +94,17 @@ def add_provider_usage(state: WorkflowState, provider_info: dict[str, Any]):
     if candidate not in usage:
         usage.append(candidate)
     state["provider_usage"] = usage
+
+
+def load_workflow_context(organization_id: str) -> dict[str, Any]:
+    active = workflow_store.get_active(organization_id)
+    if not active:
+        return {}
+    return {
+        "workflow": active.get("compiled_definition", {}),
+        "workflow_deployment": active,
+        "runtime_config": active.get("runtime_config", {}),
+    }
 
 
 async def evaluate_policy(client: httpx.AsyncClient, state: WorkflowState, payload: dict[str, Any]) -> dict[str, Any]:
@@ -139,6 +155,7 @@ async def head_admin(state: WorkflowState):
     )
     internal_headers = {"x-organization-id": state["organization_id"], "x-operator-id": state.get("actor_id", ""), "x-operator-role": state.get("context", {}).get("operator_role", "operator")}
     async with httpx.AsyncClient(timeout=20.0, headers=internal_headers) as client:
+        runtime_config = state.get("runtime_config", {})
         try:
             team_response = await client.get(f"{AGENT_SERVICE_URL}/v1/teams/{state['team_id']}")
             if team_response.is_success:
@@ -158,8 +175,8 @@ async def head_admin(state: WorkflowState):
         except Exception:
             pass
 
-        target_agent_name = state.get("context", {}).get("delegation_target_name", "finance-agent")
-        target_agent_id = state.get("context", {}).get("delegation_target_id")
+        target_agent_name = state.get("context", {}).get("delegation_target_name") or runtime_config.get("delegation_target_name") or "finance-agent"
+        target_agent_id = state.get("context", {}).get("delegation_target_id") or runtime_config.get("delegation_target_id")
         if not target_agent_id:
             target_agent_ids = list((state.get("team", {}) or {}).get("agent_ids", []))
             target_agent_id = target_agent_ids[0] if target_agent_ids else None
@@ -226,7 +243,7 @@ async def finance_agent(state: WorkflowState):
     async with httpx.AsyncClient(timeout=20.0, headers=internal_headers) as client:
         skill_id = state.get("context", {}).get("skill_id")
         if not skill_id:
-            skill_id = state.get("context", {}).get("default_skill_id", "demo-skill")
+            skill_id = state.get("runtime_config", {}).get("skill_id") or state.get("context", {}).get("default_skill_id", "demo-skill")
 
         pre_skill_decision = await evaluate_policy(
             client,
@@ -235,7 +252,7 @@ async def finance_agent(state: WorkflowState):
                 "role_id": state.get("context", {}).get("role_id"),
                 "team_id": state["team_id"],
                 "skill_ids": [skill_id],
-                "provider_name": settings.model_provider,
+                "provider_name": runtime_config.get("provider_name") or settings.model_provider,
                 "execution_mode": "skill_execution",
                 "risk_score": (state.get("team", {}) or {}).get("governance_config", {}).get("risk_score", 0.82),
                 "skill_execution_count": state.get("skill_execution_count", 0) + 1,
@@ -553,6 +570,52 @@ def get_execution_status(request_id: str, request: Request):
     return {"ok": True, "status": status}
 
 
+@app.get("/v1/workflows/active")
+def get_active_workflow(request: Request):
+    organization_id = require_request_organization(request)
+    deployment = workflow_store.get_active(organization_id)
+    if not deployment:
+        return {"ok": True, "deployment": None}
+    return {"ok": True, "deployment": deployment}
+
+
+@app.post("/v1/workflows/validate")
+def validate_workflow(payload: dict[str, Any], request: Request):
+    organization_id = require_request_organization(request)
+    operator_context = request_scope(request)
+    compiled = compile_workflow(payload.get("workflow", payload), organization_id=organization_id, operator_id=operator_context["operator_id"])
+    return {"ok": True, **compiled}
+
+
+@app.post("/v1/workflows/deploy")
+def deploy_workflow(payload: dict[str, Any], request: Request):
+    organization_id = require_request_organization(request)
+    operator_context = request_scope(request)
+    compiled = compile_workflow(payload.get("workflow", payload), organization_id=organization_id, operator_id=operator_context["operator_id"])
+    if any(issue["level"] == "error" for issue in compiled.get("issues", [])):
+        raise HTTPException(status_code=422, detail={"code": "workflow_validation_failed", **compiled})
+    deployment = workflow_store.deploy(organization_id=organization_id, operator_id=operator_context["operator_id"] or "system", compiled=compiled)
+    events.emit("workflow.deployed", {"organization_id": organization_id, "deployment_id": deployment["id"], "version": deployment["version"]})
+    return {"ok": True, "deployment": deployment, "compiled": compiled}
+
+
+@app.get("/v1/workflows/versions")
+def list_workflow_versions(request: Request):
+    organization_id = require_request_organization(request)
+    return {"ok": True, "versions": workflow_store.list_versions(organization_id)}
+
+
+@app.post("/v1/workflows/{deployment_id}/rollback")
+def rollback_workflow(deployment_id: str, request: Request):
+    organization_id = require_request_organization(request)
+    try:
+        deployment = workflow_store.rollback(organization_id=organization_id, deployment_id=deployment_id)
+    except ValueError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+    events.emit("workflow.rolled_back", {"organization_id": organization_id, "deployment_id": deployment_id, "version": deployment["version"]})
+    return {"ok": True, "deployment": deployment}
+
+
 @app.post("/v1/tasks")
 async def create_task(payload: TaskCreate, request: Request):
     if GRAPH is None:
@@ -589,6 +652,16 @@ async def create_task(payload: TaskCreate, request: Request):
         "skill_execution_count": 0,
         "current_step": "queued",
     }
+    initial_state.update(load_workflow_context(organization_id))
+    initial_state["context"] = {
+        **payload.context,
+        **initial_state.get("runtime_config", {}),
+        "organization_id": organization_id,
+        "operator_id": operator_context["operator_id"] or payload.operator_id,
+        "operator_role": operator_context["operator_role"] or "operator",
+    }
+    if not initial_state.get("subsystem"):
+        initial_state["subsystem"] = initial_state.get("runtime_config", {}).get("subsystem") or payload.subsystem
 
     try:
         result = await GRAPH.ainvoke(initial_state)
