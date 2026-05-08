@@ -32,6 +32,18 @@ def auth_headers(api_key: str):
     return {"X-Api-Key": api_key}
 
 
+def wait_for_queue_item(client: httpx.Client, gateway_url: str, api_key: str, request_id: str, attempts: int = 30, delay: float = 2.0):
+    last_payload = None
+    for _ in range(attempts):
+        payload = require_ok(client.get(f"{gateway_url}/v1/workflows/queue/status", headers=auth_headers(api_key)), "queue status failed")
+        last_payload = payload
+        item = next((entry for entry in payload.get("queue", {}).get("items", []) if entry.get("request_id") == request_id), None)
+        if item and item.get("status") in {"completed", "failed", "dead_letter", "cancelled"}:
+            return payload, item
+        time.sleep(delay)
+    raise RuntimeError(f"queued workflow did not finish in time: {last_payload}")
+
+
 def main():
     settings = load_settings("validation-runner", 0)
     gateway_url = settings.__dict__.get("gateway_url") or "http://api-gateway:8080"
@@ -417,6 +429,118 @@ def main():
         if not any(event.get("event_type") == "policy.violation" for event in blocked_skill_detail.get("events", [])):
             raise RuntimeError("blocked skill execution did not record a policy violation")
 
+        queued_result = require_ok(
+            client.post(
+                f"{gateway_url}/v1/workflows/enqueue",
+                headers=auth_headers(admin_a_key),
+                json={
+                    "team_id": team_a["team"]["id"],
+                    "task": "Queue validation: review Q4 operating plan and prepare approval summary.",
+                    "actor_id": "head-admin",
+                    "subsystem": "admin",
+                    "context": {
+                        "role_id": role["id"],
+                        "skill_id": skill["id"],
+                        "default_skill_id": skill["id"],
+                        "validation_case": "queue-complete",
+                    },
+                    "short_term_memory": [{"from": "validation-runner", "task": "queue-complete"}],
+                    "priority": 10,
+                    "max_retries": 2,
+                },
+            ),
+            "workflow enqueue failed",
+        )
+        queued_request_id = queued_result["request_id"]
+        queue_payload, queued_item = wait_for_queue_item(client, gateway_url, admin_a_key, queued_request_id)
+        if queued_item.get("status") != "completed":
+            raise RuntimeError("queued workflow did not complete successfully")
+        if queue_payload.get("queue", {}).get("summary", {}).get("completed", 0) < 1:
+            raise RuntimeError("queue summary did not record a completed execution")
+        if not queue_payload.get("queue", {}).get("workers"):
+            raise RuntimeError("worker status was not reported by queue dashboard")
+
+        retry_result = require_ok(
+            client.post(
+                f"{gateway_url}/v1/workflows/enqueue",
+                headers=auth_headers(admin_a_key),
+                json={
+                    "team_id": team_a["team"]["id"],
+                    "task": "Queue retry validation task.",
+                    "actor_id": "head-admin",
+                    "subsystem": "admin",
+                    "context": {
+                        "role_id": role["id"],
+                        "skill_id": skill["id"],
+                        "default_skill_id": skill["id"],
+                        "validation_case": "queue-retry",
+                    },
+                    "short_term_memory": [{"from": "validation-runner", "task": "queue-retry"}],
+                    "priority": 5,
+                    "max_retries": 2,
+                },
+            ),
+            "workflow retry enqueue failed",
+        )
+        retry_request_id = retry_result["request_id"]
+        retry_control = require_ok(
+            client.post(
+                f"{gateway_url}/v1/workflows/{retry_request_id}/retry",
+                headers=auth_headers(admin_a_key),
+                json={"reason": "validation_retry"},
+            ),
+            "workflow retry control failed",
+        )
+        if retry_control.get("status") != "queued":
+            raise RuntimeError("retry control did not requeue the execution")
+        retry_queue_payload, retry_item = wait_for_queue_item(client, gateway_url, admin_a_key, retry_request_id)
+        if retry_item.get("status") != "completed":
+            raise RuntimeError("retried workflow did not complete successfully")
+        if not any(entry.get("event") == "retry" for entry in retry_item.get("retry_history", [])):
+            raise RuntimeError("retry history was not recorded")
+
+        cancel_result = require_ok(
+            client.post(
+                f"{gateway_url}/v1/workflows/enqueue",
+                headers=auth_headers(admin_a_key),
+                json={
+                    "team_id": team_a["team"]["id"],
+                    "task": "Queue cancellation validation task.",
+                    "actor_id": "head-admin",
+                    "subsystem": "admin",
+                    "context": {
+                        "role_id": role["id"],
+                        "skill_id": skill["id"],
+                        "default_skill_id": skill["id"],
+                        "validation_case": "queue-cancel",
+                    },
+                    "short_term_memory": [{"from": "validation-runner", "task": "queue-cancel"}],
+                    "priority": 1,
+                    "max_retries": 1,
+                },
+            ),
+            "workflow cancel enqueue failed",
+        )
+        cancel_request_id = cancel_result["request_id"]
+        cancel_control = require_ok(
+            client.post(
+                f"{gateway_url}/v1/workflows/{cancel_request_id}/cancel",
+                headers=auth_headers(admin_a_key),
+                json={"reason": "validation_cancel"},
+            ),
+            "workflow cancel control failed",
+        )
+        if cancel_control.get("status") != "cancelled":
+            raise RuntimeError("cancel control did not cancel the execution")
+        cancel_queue_payload = require_ok(client.get(f"{gateway_url}/v1/workflows/queue/status", headers=auth_headers(admin_a_key)), "queue status after cancel failed")
+        cancel_item = next((entry for entry in cancel_queue_payload.get("queue", {}).get("items", []) if entry.get("request_id") == cancel_request_id), None)
+        if not cancel_item:
+            raise RuntimeError("cancelled workflow was not visible in queue status")
+        if cancel_item.get("status") != "cancelled":
+            raise RuntimeError("cancelled workflow did not remain cancelled")
+        if not any(entry.get("event") == "cancelled" for entry in cancel_item.get("retry_history", [])):
+            raise RuntimeError("cancellation history was not recorded")
+
         print(
             json.dumps(
                 {
@@ -428,6 +552,9 @@ def main():
                     "request_id": request_id,
                     "blocked_delegation_request_id": blocked_delegation_request_id,
                     "blocked_skill_request_id": blocked_skill_request_id,
+                    "queued_request_id": queued_request_id,
+                    "retry_request_id": retry_request_id,
+                    "cancel_request_id": cancel_request_id,
                     "viewer_operator_id": viewer_a["operator"]["id"],
                 }
             )

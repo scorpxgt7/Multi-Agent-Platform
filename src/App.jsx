@@ -1,5 +1,5 @@
 import React from "react";
-import { Activity, Database, Eye, IdCard, Shield, Workflow } from "lucide-react";
+import { Activity, Clock3, Database, Eye, IdCard, Shield, Workflow } from "lucide-react";
 
 import AgentBuilderDashboard from "./features/builder/AgentBuilderDashboard.jsx";
 import IdentityManagementDashboard from "./features/identity/IdentityManagementDashboard.jsx";
@@ -7,11 +7,12 @@ import { readIdentityState, writeIdentityState } from "./features/identity/sessi
 import NexusAgentPlatform from "./features/nexus/NexusAgentPlatform.jsx";
 import ExecutionObservabilityDashboard from "./features/observability/ExecutionObservabilityDashboard.jsx";
 import PolicyManagementDashboard from "./features/policies/PolicyManagementDashboard.jsx";
+import QueueRuntimeDashboard from "./features/queue/QueueRuntimeDashboard.jsx";
 import WorkflowBuilder from "./features/workflow/WorkflowBuilder.jsx";
 
 const ROLE_UI_PERMISSIONS = {
-  admin: new Set(["builder", "console", "runtime", "registry", "governance", "identity"]),
-  operator: new Set(["builder", "console", "runtime", "registry", "governance"]),
+  admin: new Set(["builder", "console", "runtime", "queue", "registry", "governance", "identity"]),
+  operator: new Set(["builder", "console", "runtime", "queue", "registry", "governance"]),
   viewer: new Set(["builder", "runtime"]),
 };
 
@@ -19,6 +20,7 @@ const TABS = [
   { id: "builder", label: "Builder", icon: Workflow },
   { id: "console", label: "Console", icon: Activity },
   { id: "runtime", label: "Runtime", icon: Eye },
+  { id: "queue", label: "Queue", icon: Clock3 },
   { id: "registry", label: "Registry", icon: Database },
   { id: "governance", label: "Governance", icon: Shield },
   { id: "identity", label: "Identity", icon: IdCard },
@@ -111,6 +113,7 @@ export default function App() {
         {activeView === "builder" ? <WorkflowBuilder identityState={identityState} /> : null}
         {activeView === "console" ? <NexusAgentPlatform /> : null}
         {activeView === "runtime" ? <ExecutionObservabilityDashboard /> : null}
+        {activeView === "queue" ? <QueueRuntimeDashboard /> : null}
         {activeView === "registry" ? <AgentBuilderDashboard /> : null}
         {activeView === "governance" ? <PolicyManagementDashboard /> : null}
         {activeView === "identity" ? <IdentityManagementDashboard identityState={identityState} onIdentityChange={handleIdentityChange} /> : null}

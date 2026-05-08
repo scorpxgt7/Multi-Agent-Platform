@@ -111,6 +111,14 @@ class WorkflowStore:
             definition = session.get(WorkflowDefinition, deployment.workflow_definition_id)
             return self.serialize_deployment(deployment, definition)
 
+    def get_deployment(self, *, organization_id: str, deployment_id: str) -> dict[str, Any] | None:
+        with self.session_factory() as session:
+            deployment = session.get(WorkflowDeployment, deployment_id)
+            if not deployment or deployment.organization_id != organization_id:
+                return None
+            definition = session.get(WorkflowDefinition, deployment.workflow_definition_id)
+            return self.serialize_deployment(deployment, definition)
+
     def rollback(self, *, organization_id: str, deployment_id: str) -> dict[str, Any]:
         with self.session_factory() as session:
             deployment = session.get(WorkflowDeployment, deployment_id)

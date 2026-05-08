@@ -23,6 +23,8 @@ ROUTES = {
     "tasks": ORCHESTRATOR_SERVICE_BASE + "/v1/tasks",
     "executions": ORCHESTRATOR_SERVICE_BASE + "/v1/executions",
     "workflows": ORCHESTRATOR_SERVICE_BASE + "/v1/workflows",
+    "workflow_queue": ORCHESTRATOR_SERVICE_BASE + "/v1/workflows/queue/status",
+    "workflow_enqueue": ORCHESTRATOR_SERVICE_BASE + "/v1/workflows/enqueue",
 }
 
 
@@ -198,6 +200,30 @@ async def evaluate_policy(payload: dict[str, Any], request: Request):
 async def create_task(payload: dict[str, Any], request: Request):
     identity = await resolve_identity(request, required_permission="execution:run")
     return await forward("POST", ROUTES["tasks"], identity=identity, payload=payload)
+
+
+@app.post("/v1/workflows/enqueue")
+async def enqueue_workflow(payload: dict[str, Any], request: Request):
+    identity = await resolve_identity(request, required_permission="execution:run")
+    return await forward("POST", ROUTES["workflow_enqueue"], identity=identity, payload=payload)
+
+
+@app.post("/v1/workflows/{request_id}/cancel")
+async def cancel_workflow(request_id: str, payload: dict[str, Any], request: Request):
+    identity = await resolve_identity(request, required_permission="execution:run")
+    return await forward("POST", f"{ROUTES['workflows']}/{request_id}/cancel", identity=identity, payload=payload)
+
+
+@app.post("/v1/workflows/{request_id}/retry")
+async def retry_workflow(request_id: str, payload: dict[str, Any], request: Request):
+    identity = await resolve_identity(request, required_permission="execution:run")
+    return await forward("POST", f"{ROUTES['workflows']}/{request_id}/retry", identity=identity, payload=payload)
+
+
+@app.get("/v1/workflows/queue/status")
+async def workflow_queue_status(request: Request):
+    identity = await resolve_identity(request, required_permission="execution:view")
+    return await forward("GET", ROUTES["workflow_queue"], identity=identity)
 
 
 @app.get("/v1/executions")

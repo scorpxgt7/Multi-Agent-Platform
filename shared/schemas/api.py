@@ -179,3 +179,25 @@ class WorkflowDeployRequest(BaseModel):
 
 class WorkflowRollbackRequest(BaseModel):
     deployment_id: str
+
+
+class WorkflowEnqueueRequest(BaseModel):
+    team_id: str
+    task: str
+    actor_id: str = "head-admin"
+    subsystem: str = "mission"
+    organization_id: str | None = None
+    operator_id: str | None = None
+    context: dict[str, Any] = Field(default_factory=dict)
+    short_term_memory: list[dict[str, Any]] = Field(default_factory=list)
+    workflow_deployment_id: str | None = None
+    priority: int = 100
+    max_retries: int = 3
+
+
+class WorkflowCancelRequest(BaseModel):
+    reason: str = "cancelled_by_operator"
+
+
+class WorkflowRetryRequest(BaseModel):
+    reason: str = "retried_by_operator"

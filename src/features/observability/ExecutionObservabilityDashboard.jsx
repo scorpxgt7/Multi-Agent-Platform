@@ -199,6 +199,7 @@ export default function ExecutionObservabilityDashboard() {
                   <strong>{detail.execution.task}</strong>
                   <p>Team: {detail.execution.team_id}</p>
                   <p>Request: {detail.execution.request_id}</p>
+                  <p>Queue: {detail.execution.queue_status} • retries: {detail.execution.retry_count}</p>
                 </div>
                 <span className={statusClass(detail.execution.latest_status)}>{detail.execution.latest_status}</span>
               </div>

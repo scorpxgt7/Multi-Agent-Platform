@@ -4,7 +4,8 @@ import httpx
 from fastapi import FastAPI, HTTPException, Request
 
 from execution_store import ExecutionStore
-from shared.schemas import TaskCreate
+from queue_store import WorkflowQueueStore
+from shared.schemas import TaskCreate, WorkflowCancelRequest, WorkflowEnqueueRequest, WorkflowRetryRequest
 from shared.utils.config import load_settings
 from shared.utils.database import create_session_factory
 from shared.utils.events import EventBus
@@ -23,6 +24,7 @@ events = EventBus(settings.redis_url, settings.event_channel)
 SessionLocal = create_session_factory(settings.database_url)
 execution_store = ExecutionStore(SessionLocal)
 workflow_store = WorkflowStore(SessionLocal)
+queue_store = WorkflowQueueStore(SessionLocal, execution_store, workflow_store, events)
 app = FastAPI(title="orchestrator-service", version="1.0.0")
 
 AGENT_SERVICE_URL = "http://agent-service:8102"
@@ -52,10 +54,23 @@ class WorkflowState(TypedDict, total=False):
     policy_violation: dict[str, Any]
     workflow: dict[str, Any]
     workflow_deployment: dict[str, Any]
+    workflow_progress: dict[str, Any]
+    queue_item_id: str
 
 
 def transition(state: WorkflowState, *, status: str, step: str, event_type: str, agent_name: str = "", payload: dict[str, Any] | None = None):
     state["current_step"] = step
+    if state.get("queue_item_id"):
+        queue_store.record_checkpoint(
+            execution_id=state["execution_id"],
+            request_id=state["request_id"],
+            organization_id=state["organization_id"],
+            team_id=state["team_id"],
+            step_name=step,
+            status=status,
+            state_snapshot=dict(state),
+            metadata={"event_type": event_type, "agent_name": agent_name, "payload": payload or {}},
+        )
     execution_store.update_run(
         execution_id=state["execution_id"],
         latest_status=status,
@@ -64,6 +79,7 @@ def transition(state: WorkflowState, *, status: str, step: str, event_type: str,
         provider_usage=state.get("provider_usage", []),
         state_snapshot=dict(state),
         result_payload=state.get("final_result", {}),
+        queue_status=state.get("queue_status"),
     )
     execution_store.append_event(
         execution_id=state["execution_id"],
@@ -96,7 +112,15 @@ def add_provider_usage(state: WorkflowState, provider_info: dict[str, Any]):
     state["provider_usage"] = usage
 
 
-def load_workflow_context(organization_id: str) -> dict[str, Any]:
+def load_workflow_context(organization_id: str, deployment_id: str | None = None) -> dict[str, Any]:
+    if deployment_id:
+        deployment = workflow_store.get_deployment(organization_id=organization_id, deployment_id=deployment_id)
+        if deployment:
+            return {
+                "workflow": deployment.get("compiled_definition", {}),
+                "workflow_deployment": deployment,
+                "runtime_config": deployment.get("runtime_config", {}),
+            }
     active = workflow_store.get_active(organization_id)
     if not active:
         return {}
@@ -107,10 +131,62 @@ def load_workflow_context(organization_id: str) -> dict[str, Any]:
     }
 
 
+def build_execution_state(
+    *,
+    organization_id: str,
+    operator_context: dict[str, Any],
+    payload: TaskCreate,
+    execution_identifiers: dict[str, str],
+    queue_item_id: str = "",
+    workflow_context: dict[str, Any] | None = None,
+) -> WorkflowState:
+    state: WorkflowState = {
+        "request_id": execution_identifiers["request_id"],
+        "execution_id": execution_identifiers["execution_id"],
+        "organization_id": organization_id,
+        "task": payload.task,
+        "team_id": payload.team_id,
+        "actor_id": operator_context["operator_id"] or payload.actor_id,
+        "subsystem": payload.subsystem,
+        "context": {
+            **payload.context,
+            "organization_id": organization_id,
+            "operator_id": operator_context["operator_id"] or payload.operator_id,
+            "operator_role": operator_context["operator_role"] or "operator",
+        },
+        "short_term_memory": payload.short_term_memory,
+        "delegation_chain": [],
+        "provider_usage": [],
+        "skill_execution_count": 0,
+        "workflow_progress": {},
+        "current_step": "queued",
+    }
+    if queue_item_id:
+        state["queue_item_id"] = queue_item_id
+    if workflow_context:
+        state.update(workflow_context)
+    state["context"] = {
+        **payload.context,
+        **state.get("runtime_config", {}),
+        "organization_id": organization_id,
+        "operator_id": operator_context["operator_id"] or payload.operator_id,
+        "operator_role": operator_context["operator_role"] or "operator",
+    }
+    if not state.get("subsystem"):
+        state["subsystem"] = state.get("runtime_config", {}).get("subsystem") or payload.subsystem
+    return state
+
+
+async def execute_workflow_graph(initial_state: WorkflowState) -> WorkflowState:
+    if GRAPH is None:
+        raise HTTPException(status_code=503, detail="LangGraph dependency is unavailable for orchestrator-service.")
+    return await GRAPH.ainvoke(initial_state)
+
+
 async def evaluate_policy(client: httpx.AsyncClient, state: WorkflowState, payload: dict[str, Any]) -> dict[str, Any]:
     response = await client.post(f"{POLICY_SERVICE_URL}/v1/policies/evaluate", json=payload)
     if response.is_success:
-      return response.json().get("decision", {})
+        return response.json().get("decision", {})
     return {"approved": True, "requires_approval": False, "violations": []}
 
 
@@ -142,7 +218,25 @@ def finance_route(state: WorkflowState):
     return "policy_blocked" if state.get("policy_violation") else "approval_gate"
 
 
+def mark_progress(state: WorkflowState, step: str):
+    progress = state.setdefault("workflow_progress", {})
+    progress[step] = True
+    if state.get("queue_item_id"):
+        queue_store.record_checkpoint(
+            execution_id=state["execution_id"],
+            request_id=state["request_id"],
+            organization_id=state["organization_id"],
+            team_id=state["team_id"],
+            step_name=step,
+            status=state.get("queue_status", "running"),
+            state_snapshot=dict(state),
+            metadata={"event_type": "workflow.progress", "step": step},
+        )
+
+
 async def head_admin(state: WorkflowState):
+    if state.get("workflow_progress", {}).get("head_admin"):
+        return state
     events.emit("task.started", {"request_id": state["request_id"], "team_id": state["team_id"], "subsystem": state["subsystem"], "task": state["task"]})
     state["short_term_memory"] = state.get("short_term_memory", []) + [{"from": "head-admin", "task": state["task"]}]
     transition(
@@ -219,6 +313,7 @@ async def head_admin(state: WorkflowState):
         agent_name="head-admin",
         payload={"to": "finance-agent", "delegation_chain": state.get("delegation_chain", [])},
     )
+    mark_progress(state, "head_admin")
     execution_store.update_run(
         execution_id=state["execution_id"],
         latest_status="running",
@@ -231,6 +326,8 @@ async def head_admin(state: WorkflowState):
 
 
 async def finance_agent(state: WorkflowState):
+    if state.get("workflow_progress", {}).get("finance_agent"):
+        return state
     transition(
         state,
         status="running",
@@ -241,6 +338,7 @@ async def finance_agent(state: WorkflowState):
     )
     internal_headers = {"x-organization-id": state["organization_id"], "x-operator-id": state.get("actor_id", ""), "x-operator-role": state.get("context", {}).get("operator_role", "operator")}
     async with httpx.AsyncClient(timeout=20.0, headers=internal_headers) as client:
+        runtime_config = state.get("runtime_config", {})
         skill_id = state.get("context", {}).get("skill_id")
         if not skill_id:
             skill_id = state.get("runtime_config", {}).get("skill_id") or state.get("context", {}).get("default_skill_id", "demo-skill")
@@ -331,6 +429,7 @@ async def finance_agent(state: WorkflowState):
         agent_name="finance-agent",
         payload=finance_result,
     )
+    mark_progress(state, "finance_agent")
     execution_store.update_run(
         execution_id=state["execution_id"],
         latest_status="running",
@@ -343,6 +442,8 @@ async def finance_agent(state: WorkflowState):
 
 
 async def approval_gate(state: WorkflowState):
+    if state.get("workflow_progress", {}).get("approval_gate"):
+        return state
     transition(
         state,
         status="running",
@@ -385,6 +486,7 @@ async def approval_gate(state: WorkflowState):
         agent_name="policy-service",
         payload=approval,
     )
+    mark_progress(state, "approval_gate")
     execution_store.update_run(
         execution_id=state["execution_id"],
         latest_status="running",
@@ -401,6 +503,8 @@ def approval_route(state: WorkflowState):
 
 
 async def awaiting_approval(state: WorkflowState):
+    if state.get("workflow_progress", {}).get("awaiting_approval"):
+        return state
     state["final_result"] = {
         "status": "awaiting_approval",
         "summary": "Head Admin delegated to Finance Agent. Approval is required before completion.",
@@ -419,6 +523,7 @@ async def awaiting_approval(state: WorkflowState):
         agent_name="head-admin",
         payload=state["final_result"],
     )
+    mark_progress(state, "awaiting_approval")
     execution_store.update_run(
         execution_id=state["execution_id"],
         latest_status="awaiting_approval",
@@ -433,6 +538,8 @@ async def awaiting_approval(state: WorkflowState):
 
 
 async def finalize(state: WorkflowState):
+    if state.get("workflow_progress", {}).get("finalize"):
+        return state
     transition(
         state,
         status="running",
@@ -473,6 +580,7 @@ async def finalize(state: WorkflowState):
         agent_name="head-admin",
         payload=state["final_result"],
     )
+    mark_progress(state, "finalize")
     execution_store.update_run(
         execution_id=state["execution_id"],
         latest_status="completed",
@@ -487,6 +595,8 @@ async def finalize(state: WorkflowState):
 
 
 async def policy_blocked(state: WorkflowState):
+    if state.get("workflow_progress", {}).get("policy_blocked"):
+        return state
     violation = state.get("policy_violation", {})
     state["final_result"] = {
         "status": "failed",
@@ -504,6 +614,7 @@ async def policy_blocked(state: WorkflowState):
         agent_name="policy-service",
         payload=state["final_result"],
     )
+    mark_progress(state, "policy_blocked")
     execution_store.update_run(
         execution_id=state["execution_id"],
         latest_status="failed",
@@ -616,14 +727,70 @@ def rollback_workflow(deployment_id: str, request: Request):
     return {"ok": True, "deployment": deployment}
 
 
-@app.post("/v1/tasks")
-async def create_task(payload: TaskCreate, request: Request):
-    if GRAPH is None:
-        raise HTTPException(status_code=503, detail="LangGraph dependency is unavailable for orchestrator-service.")
+@app.get("/v1/workflows/queue/status")
+def get_queue_status(request: Request):
+    organization_id = require_request_organization(request)
+    return {"ok": True, "queue": queue_store.status(organization_id)}
 
+
+@app.post("/v1/workflows/enqueue")
+async def enqueue_workflow(payload: WorkflowEnqueueRequest, request: Request):
     organization_id = require_request_organization(request)
     operator_context = request_scope(request)
+    queued = queue_store.enqueue(
+        organization_id=organization_id,
+        team_id=payload.team_id,
+        actor_id=operator_context["operator_id"] or payload.actor_id,
+        subsystem=payload.subsystem,
+        task=payload.task,
+        context={
+            **payload.context,
+            "operator_id": operator_context["operator_id"] or payload.operator_id,
+            "operator_role": operator_context["operator_role"] or "operator",
+        },
+        short_term_memory=payload.short_term_memory,
+        workflow_deployment_id=payload.workflow_deployment_id,
+        priority=payload.priority,
+        max_retries=payload.max_retries,
+    )
+    return {"ok": True, **queued}
 
+
+@app.post("/v1/workflows/{request_id}/cancel")
+def cancel_workflow(request_id: str, payload: WorkflowCancelRequest, request: Request):
+    organization_id = require_request_organization(request)
+    try:
+        cancelled = queue_store.cancel(
+            organization_id=organization_id,
+            request_id=request_id,
+            reason=payload.reason,
+            operator_id=request_scope(request)["operator_id"] or "system",
+        )
+    except ValueError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+    return {"ok": True, **cancelled}
+
+
+@app.post("/v1/workflows/{request_id}/retry")
+def retry_workflow(request_id: str, payload: WorkflowRetryRequest, request: Request):
+    organization_id = require_request_organization(request)
+    try:
+        retried = queue_store.retry(
+            organization_id=organization_id,
+            request_id=request_id,
+            reason=payload.reason,
+            operator_id=request_scope(request)["operator_id"] or "system",
+        )
+    except ValueError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+    return {"ok": True, **retried}
+
+
+@app.post("/v1/tasks")
+async def create_task(payload: TaskCreate, request: Request):
+    organization_id = require_request_organization(request)
+    operator_context = request_scope(request)
+    workflow_context = load_workflow_context(organization_id)
     execution_identifiers = execution_store.create_run(
         organization_id=organization_id,
         team_id=payload.team_id,
@@ -631,40 +798,19 @@ async def create_task(payload: TaskCreate, request: Request):
         subsystem=payload.subsystem,
         task=payload.task,
         context=payload.context,
+        workflow_definition_id=workflow_context.get("workflow_deployment", {}).get("workflow_definition_id", ""),
+        workflow_deployment_id=workflow_context.get("workflow_deployment", {}).get("id", ""),
     )
-    initial_state: WorkflowState = {
-        "request_id": execution_identifiers["request_id"],
-        "execution_id": execution_identifiers["execution_id"],
-        "organization_id": organization_id,
-        "task": payload.task,
-        "team_id": payload.team_id,
-        "actor_id": operator_context["operator_id"] or payload.actor_id,
-        "subsystem": payload.subsystem,
-        "context": {
-            **payload.context,
-            "organization_id": organization_id,
-            "operator_id": operator_context["operator_id"] or payload.operator_id,
-            "operator_role": operator_context["operator_role"] or "operator",
-        },
-        "short_term_memory": payload.short_term_memory,
-        "delegation_chain": [],
-        "provider_usage": [],
-        "skill_execution_count": 0,
-        "current_step": "queued",
-    }
-    initial_state.update(load_workflow_context(organization_id))
-    initial_state["context"] = {
-        **payload.context,
-        **initial_state.get("runtime_config", {}),
-        "organization_id": organization_id,
-        "operator_id": operator_context["operator_id"] or payload.operator_id,
-        "operator_role": operator_context["operator_role"] or "operator",
-    }
-    if not initial_state.get("subsystem"):
-        initial_state["subsystem"] = initial_state.get("runtime_config", {}).get("subsystem") or payload.subsystem
+    initial_state = build_execution_state(
+        organization_id=organization_id,
+        operator_context=operator_context,
+        payload=payload,
+        execution_identifiers=execution_identifiers,
+        workflow_context=workflow_context,
+    )
 
     try:
-        result = await GRAPH.ainvoke(initial_state)
+        result = await execute_workflow_graph(initial_state)
     except Exception as error:
         execution_store.append_event(
             execution_id=execution_identifiers["execution_id"],

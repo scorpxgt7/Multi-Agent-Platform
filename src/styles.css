@@ -1021,6 +1021,11 @@ textarea {
   gap: 12px;
 }
 
+.builder-list-item-active {
+  border-color: rgba(114, 231, 189, 0.4);
+  box-shadow: 0 0 0 1px rgba(114, 231, 189, 0.12) inset;
+}
+
 .builder-list-item p,
 .builder-snapshot-card p,
 .builder-snapshot-card ul {
@@ -1083,6 +1088,12 @@ textarea {
   color: #a8d5ff;
 }
 
+.execution-status-retrying,
+.execution-status-idle {
+  background: #18384a;
+  color: #9fe7ff;
+}
+
 .execution-status-completed {
   background: #123224;
   color: #bff3d0;
@@ -1096,6 +1107,13 @@ textarea {
 .execution-status-failed {
   background: #4d1c26;
   color: #ffb6c2;
+}
+
+.execution-status-cancelled,
+.execution-status-dead_letter,
+.execution-status-error {
+  background: #4a3215;
+  color: #ffcf9a;
 }
 
 .execution-timeline {

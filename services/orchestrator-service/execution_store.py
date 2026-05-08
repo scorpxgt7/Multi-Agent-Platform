@@ -22,7 +22,20 @@ class ExecutionStore:
     def __init__(self, session_factory):
         self.session_factory = session_factory
 
-    def create_run(self, *, organization_id: str, team_id: str, actor_id: str, subsystem: str, task: str, context: dict[str, Any]) -> dict[str, str]:
+    def create_run(
+        self,
+        *,
+        organization_id: str,
+        team_id: str,
+        actor_id: str,
+        subsystem: str,
+        task: str,
+        context: dict[str, Any],
+        workflow_definition_id: str = "",
+        workflow_deployment_id: str = "",
+        queue_status: str = "not_queued",
+        retry_count: int = 0,
+    ) -> dict[str, str]:
         request_id = str(uuid.uuid4())
         execution_id = str(uuid.uuid4())
         with self.session_factory() as session:
@@ -34,9 +47,13 @@ class ExecutionStore:
                 actor_id=actor_id,
                 subsystem=subsystem,
                 task=task,
+                workflow_definition_id=workflow_definition_id,
+                workflow_deployment_id=workflow_deployment_id,
                 latest_status=ExecutionStatus.queued,
                 final_status=ExecutionStatus.queued.value,
                 current_step="received",
+                queue_status=queue_status,
+                retry_count=retry_count,
                 context=context,
                 state_snapshot={},
             )
@@ -100,6 +117,10 @@ class ExecutionStore:
         result_payload: dict[str, Any] | None = None,
         error_message: str | None = None,
         completed: bool = False,
+        queue_status: str | None = None,
+        retry_count: int | None = None,
+        workflow_definition_id: str | None = None,
+        workflow_deployment_id: str | None = None,
     ) -> None:
         with self.session_factory() as session:
             run = session.get(ExecutionRun, execution_id)
@@ -118,8 +139,18 @@ class ExecutionStore:
                 run.result_payload = result_payload
             if error_message is not None:
                 run.error_message = error_message
+            if queue_status is not None:
+                run.queue_status = queue_status
+            if retry_count is not None:
+                run.retry_count = retry_count
+            if workflow_definition_id is not None:
+                run.workflow_definition_id = workflow_definition_id
+            if workflow_deployment_id is not None:
+                run.workflow_deployment_id = workflow_deployment_id
             if completed:
                 run.completed_at = now_utc()
+            elif latest_status in {"queued", "running", "retrying"}:
+                run.completed_at = None
             session.commit()
 
     def list_runs(self, organization_id: str) -> list[dict[str, Any]]:
@@ -134,9 +165,13 @@ class ExecutionStore:
                     "actor_id": run.actor_id,
                     "subsystem": run.subsystem,
                     "task": run.task,
+                    "workflow_definition_id": run.workflow_definition_id,
+                    "workflow_deployment_id": run.workflow_deployment_id,
                     "latest_status": status_value(run.latest_status),
                     "final_status": run.final_status,
                     "current_step": run.current_step,
+                    "queue_status": run.queue_status,
+                    "retry_count": run.retry_count,
                     "delegation_chain": run.delegation_chain,
                     "provider_usage": run.provider_usage,
                     "started_at": run.started_at.isoformat() if run.started_at else None,
@@ -161,9 +196,13 @@ class ExecutionStore:
                     "actor_id": run.actor_id,
                     "subsystem": run.subsystem,
                     "task": run.task,
+                    "workflow_definition_id": run.workflow_definition_id,
+                    "workflow_deployment_id": run.workflow_deployment_id,
                     "latest_status": status_value(run.latest_status),
                     "final_status": run.final_status,
                     "current_step": run.current_step,
+                    "queue_status": run.queue_status,
+                    "retry_count": run.retry_count,
                     "delegation_chain": run.delegation_chain,
                     "provider_usage": run.provider_usage,
                     "context": run.context,
@@ -196,11 +235,13 @@ class ExecutionStore:
             return {
                 "request_id": run.request_id,
                 "organization_id": run.organization_id,
-                "team_id": run.team_id,
-                "latest_status": status_value(run.latest_status),
-                "current_step": run.current_step,
-                "delegation_chain": run.delegation_chain,
-                "provider_usage": run.provider_usage,
-                "started_at": run.started_at.isoformat() if run.started_at else None,
+                    "team_id": run.team_id,
+                    "latest_status": status_value(run.latest_status),
+                    "current_step": run.current_step,
+                    "queue_status": run.queue_status,
+                    "retry_count": run.retry_count,
+                    "delegation_chain": run.delegation_chain,
+                    "provider_usage": run.provider_usage,
+                    "started_at": run.started_at.isoformat() if run.started_at else None,
                 "completed_at": run.completed_at.isoformat() if run.completed_at else None,
             }

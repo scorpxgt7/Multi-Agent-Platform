@@ -37,6 +37,7 @@ class ExecutionStatus(str, enum.Enum):
     awaiting_approval = "awaiting_approval"
     completed = "completed"
     failed = "failed"
+    cancelled = "cancelled"
 
 
 class Skill(Base):
@@ -169,9 +170,13 @@ class ExecutionRun(Base):
     actor_id: Mapped[str] = mapped_column(String(128), nullable=False, default="head-admin")
     subsystem: Mapped[str] = mapped_column(String(64), nullable=False, default="mission")
     task: Mapped[str] = mapped_column(Text, nullable=False)
+    workflow_definition_id: Mapped[str] = mapped_column(String(64), nullable=False, default="", index=True)
+    workflow_deployment_id: Mapped[str] = mapped_column(String(64), nullable=False, default="", index=True)
     latest_status: Mapped[ExecutionStatus] = mapped_column(Enum(ExecutionStatus), nullable=False, default=ExecutionStatus.queued, index=True)
     final_status: Mapped[str] = mapped_column(String(64), nullable=False, default="queued")
     current_step: Mapped[str] = mapped_column(String(128), nullable=False, default="received")
+    queue_status: Mapped[str] = mapped_column(String(32), nullable=False, default="not_queued", index=True)
+    retry_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     delegation_chain: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
     provider_usage: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
     context: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
@@ -294,3 +299,65 @@ class WorkflowDeployment(Base):
     rolled_back_from_deployment_id: Mapped[str] = mapped_column(String(64), nullable=False, default="")
     created_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+
+
+class WorkflowQueueItem(Base):
+    __tablename__ = "workflow_queue_items"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True, default=lambda: str(uuid.uuid4()))
+    organization_id: Mapped[str] = mapped_column(ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
+    execution_id: Mapped[str] = mapped_column(ForeignKey("execution_runs.id", ondelete="CASCADE"), nullable=False, unique=True, index=True)
+    request_id: Mapped[str] = mapped_column(String(64), nullable=False, unique=True, index=True)
+    workflow_definition_id: Mapped[str] = mapped_column(String(64), nullable=False, default="", index=True)
+    workflow_deployment_id: Mapped[str] = mapped_column(String(64), nullable=False, default="", index=True)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="queued", index=True)
+    priority: Mapped[int] = mapped_column(Integer, nullable=False, default=100)
+    attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    max_retries: Mapped[int] = mapped_column(Integer, nullable=False, default=3)
+    worker_id: Mapped[str] = mapped_column(String(128), nullable=False, default="")
+    queued_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    next_attempt_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    locked_at: Mapped[DateTime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    started_at: Mapped[DateTime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    completed_at: Mapped[DateTime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_error: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    checkpoint_state: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    retry_history: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
+
+
+class WorkflowCheckpoint(Base):
+    __tablename__ = "workflow_checkpoints"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True, default=lambda: str(uuid.uuid4()))
+    organization_id: Mapped[str] = mapped_column(ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
+    execution_id: Mapped[str] = mapped_column(ForeignKey("execution_runs.id", ondelete="CASCADE"), nullable=False, index=True)
+    request_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    step_name: Mapped[str] = mapped_column(String(128), nullable=False)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="running")
+    state_snapshot: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    metadata: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    created_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+
+class WorkflowDeadLetter(Base):
+    __tablename__ = "workflow_dead_letters"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True, default=lambda: str(uuid.uuid4()))
+    organization_id: Mapped[str] = mapped_column(ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
+    execution_id: Mapped[str] = mapped_column(ForeignKey("execution_runs.id", ondelete="CASCADE"), nullable=False, index=True)
+    request_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    reason: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    payload: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    created_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+
+class WorkerHeartbeat(Base):
+    __tablename__ = "worker_heartbeats"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True, default=lambda: str(uuid.uuid4()))
+    worker_id: Mapped[str] = mapped_column(String(128), nullable=False, unique=True, index=True)
+    worker_type: Mapped[str] = mapped_column(String(64), nullable=False, default="workflow-worker")
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="idle")
+    current_request_id: Mapped[str] = mapped_column(String(64), nullable=False, default="")
+    details: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    last_heartbeat_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
