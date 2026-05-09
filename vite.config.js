@@ -1,4 +1,3 @@
-import path from "node:path";
 import { defineConfig } from "vite";
 
 export default defineConfig({
@@ -6,7 +5,7 @@ export default defineConfig({
   build: {
     rollupOptions: {
       input: {
-        index: path.resolve("app.html"),
+        index: "app.html",
       },
       output: {
         entryFileNames: "assets/app.js",
