@@ -133,6 +133,37 @@ textarea {
   border: 1px solid #233244;
 }
 
+.deploy-banner.staging {
+  background: #2b1e00;
+  color: #f59e0b;
+  border: 1px solid rgba(245, 158, 11, 0.12);
+}
+
+.diagnostics-panel {
+  position: fixed;
+  right: 20px;
+  top: 86px;
+  width: 480px;
+  max-height: 70vh;
+  overflow: auto;
+  background: rgba(6, 8, 12, 0.98);
+  border: 1px solid #15202d;
+  padding: 12px;
+  border-radius: 10px;
+  z-index: 9999;
+}
+.diagnostics-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.diagnostics-body {
+  font-family: monospace;
+  color: #cbd5e1;
+}
+
 .app-brand h1 {
   margin: 0;
   font-size: clamp(26px, 2.8vw, 40px);

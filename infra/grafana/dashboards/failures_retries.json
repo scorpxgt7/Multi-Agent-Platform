@@ -1,0 +1,29 @@
+{
+  "dashboard": {
+    "id": null,
+    "uid": "failures-retries",
+    "title": "Failures & Retries",
+    "schemaVersion": 37,
+    "version": 1,
+    "refresh": "15s",
+    "panels": [
+      {
+        "type": "timeseries",
+        "title": "Workflow Failures",
+        "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
+        "targets": [
+          { "expr": "sum(rate(orchestrator_execution_failures_total[5m]))", "refId": "A" }
+        ]
+      },
+      {
+        "type": "timeseries",
+        "title": "Retries",
+        "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
+        "targets": [
+          { "expr": "sum(rate(orchestrator_execution_retries_total[5m]))", "refId": "A" }
+        ]
+      }
+    ]
+  },
+  "overwrite": false
+}

@@ -1,0 +1,29 @@
+{
+  "dashboard": {
+    "id": null,
+    "uid": "deployment-health",
+    "title": "Deployment & Runtime Health",
+    "schemaVersion": 37,
+    "version": 1,
+    "refresh": "30s",
+    "panels": [
+      {
+        "type": "timeseries",
+        "title": "API Gateway Latency (p95)",
+        "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
+        "targets": [
+          { "expr": "histogram_quantile(0.95, sum(rate(api_gateway_request_duration_seconds_bucket[5m])) by (le))", "refId": "A" }
+        ]
+      },
+      {
+        "type": "timeseries",
+        "title": "Orchestrator Uptime",
+        "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
+        "targets": [
+          { "expr": "up{job=\"orchestrator\"}", "refId": "A" }
+        ]
+      }
+    ]
+  },
+  "overwrite": false
+}

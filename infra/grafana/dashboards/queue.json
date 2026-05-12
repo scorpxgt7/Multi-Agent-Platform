@@ -1,0 +1,22 @@
+{
+  "dashboard": {
+    "id": null,
+    "uid": "queue-metrics",
+    "title": "Queue Metrics",
+    "schemaVersion": 37,
+    "version": 1,
+    "refresh": "10s",
+    "panels": [
+      {
+        "type": "timeseries",
+        "title": "Queue Items",
+        "gridPos": { "h": 8, "w": 24, "x": 0, "y": 0 },
+        "targets": [
+          { "expr": "workflow_queue_items_total", "refId": "A" },
+          { "expr": "workflow_queue_items{status=\"queued\"}", "refId": "B" }
+        ]
+      }
+    ]
+  },
+  "overwrite": false
+}

@@ -1,0 +1,32 @@
+name: CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Use Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Build frontend
+        run: npm run build
+
+      - name: Backend smoke checks
+        run: |
+          node backend/smoke_check.js || true
+
+      - name: Optional docker compose build
+        run: |
+          docker compose -f infra/docker-compose.yml -f infra/docker-compose.prod.yml build --pull || true

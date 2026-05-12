@@ -1,7 +1,7 @@
 import os
 from typing import Any
 import time
-from collections import defaultdict
+from collections import defaultdict, deque
 
 import httpx
 from fastapi import FastAPI, HTTPException, Request
@@ -53,6 +53,10 @@ class SimpleRateLimiter(BaseHTTPMiddleware):
 # Attach rate limiter (scaffold)
 app.add_middleware(SimpleRateLimiter)
 
+# Timeouts and request controls (configurable)
+IDENTITY_TIMEOUT = float(os.getenv("IDENTITY_REQUEST_TIMEOUT", "10.0"))
+FORWARD_TIMEOUT = float(os.getenv("API_GATEWAY_REQUEST_TIMEOUT", "30.0"))
+
 AGENT_SERVICE_BASE = os.getenv("AGENT_SERVICE_URL", "http://agent-service:8102")
 POLICY_SERVICE_BASE = os.getenv("POLICY_SERVICE_URL", "http://policy-service:8103")
 ORCHESTRATOR_SERVICE_BASE = os.getenv("ORCHESTRATOR_SERVICE_URL", "http://orchestrator-service:8105")
@@ -80,7 +84,7 @@ async def resolve_identity(request: Request, *, required_permission: str | None 
             return None
         raise HTTPException(status_code=401, detail="api_key_required")
 
-    async with httpx.AsyncClient(timeout=20.0) as client:
+    async with httpx.AsyncClient(timeout=IDENTITY_TIMEOUT) as client:
         response = await client.get(f"{AGENT_SERVICE_BASE}/internal/operators/resolve", params={"api_key": api_key})
     if response.status_code >= 400:
         raise HTTPException(status_code=401, detail="invalid_api_key")
@@ -106,7 +110,7 @@ def forward_headers(identity: dict[str, Any] | None):
 
 
 async def forward(method: str, target: str, *, identity: dict[str, Any] | None = None, payload: dict[str, Any] | None = None):
-    async with httpx.AsyncClient(timeout=30.0) as client:
+    async with httpx.AsyncClient(timeout=FORWARD_TIMEOUT) as client:
         response = await client.request(method, target, json=payload, headers=forward_headers(identity))
     detail = None
     try:
@@ -317,3 +321,67 @@ async def list_workflow_versions(request: Request):
 async def rollback_workflow(deployment_id: str, request: Request):
     identity = await resolve_identity(request, required_permission="registry:manage")
     return await forward("POST", f"{ROUTES['workflows']}/{deployment_id}/rollback", identity=identity)
+
+
+@app.get("/v1/diagnostics")
+async def diagnostics():
+    """Lightweight diagnostics aggregator for core internal services."""
+    services = {
+        "skill": os.getenv("SKILL_SERVICE_URL", "http://skill-service:8101"),
+        "agent": os.getenv("AGENT_SERVICE_URL", "http://agent-service:8102"),
+        "policy": os.getenv("POLICY_SERVICE_URL", "http://policy-service:8103"),
+        "memory": os.getenv("MEMORY_SERVICE_URL", "http://memory-service:8104"),
+        "orchestrator": os.getenv("ORCHESTRATOR_SERVICE_URL", "http://orchestrator-service:8105"),
+    }
+    results: dict[str, Any] = {}
+    async with httpx.AsyncClient(timeout=FORWARD_TIMEOUT) as client:
+        for name, base in services.items():
+            try:
+                resp = await client.get(f"{base}/health")
+                payload = None
+                try:
+                    payload = resp.json()
+                except Exception:
+                    payload = resp.text
+                results[name] = {"ok": resp.status_code == 200, "status_code": resp.status_code, "payload": payload}
+            except Exception as exc:
+                results[name] = {"ok": False, "error": str(exc)}
+    return {"ok": True, "service": "api-gateway", "diagnostics": results}
+
+
+@app.get("/v1/deployment/report")
+async def deployment_report(verbose: bool = False):
+    """A convenience report combining diagnostics and basic readiness checks."""
+    diag = await diagnostics()
+    report = {"ok": True, "service": "api-gateway", "diagnostics": diag.get("diagnostics", {})}
+    if verbose:
+        # attempt to surface queue status from orchestrator if available
+        try:
+            async with httpx.AsyncClient(timeout=FORWARD_TIMEOUT) as client:
+                q = await client.get(f"{ORCHESTRATOR_SERVICE_BASE}/v1/workflows/queue/status")
+                try:
+                    report["queue"] = q.json()
+                except Exception:
+                    report["queue"] = {"status_code": q.status_code, "text": q.text}
+        except Exception as _:
+            report["queue"] = {"ok": False}
+    return report
+
+
+@app.get("/v1/deployment/audit")
+async def deployment_audit(limit: int = 200):
+    """Return the most recent deployment audit events from a host-level audit file.
+    Path is configured with DEPLOY_AUDIT_LOG_FILE environment variable. This is a lightweight
+    scaffold for deployment audit visibility; in production use centralized logging.
+    """
+    log_path = os.getenv("DEPLOY_AUDIT_LOG_FILE", "/var/deploy/multi-agent/audit.log")
+    if not os.path.exists(log_path):
+        return {"ok": True, "events": []}
+    try:
+        with open(log_path, "r") as fh:
+            lines = list(deque(fh, maxlen=limit))
+        # return newest first
+        events = [l.strip() for l in lines[::-1]]
+        return {"ok": True, "events": events}
+    except Exception as exc:  # pragma: no cover
+        return {"ok": False, "error": str(exc)}

@@ -9,6 +9,7 @@ import ExecutionObservabilityDashboard from "./features/observability/ExecutionO
 import PolicyManagementDashboard from "./features/policies/PolicyManagementDashboard.jsx";
 import QueueRuntimeDashboard from "./features/queue/QueueRuntimeDashboard.jsx";
 import WorkflowBuilder from "./features/workflow/WorkflowBuilder.jsx";
+import DeploymentDiagnostics from "./features/deploy/DeploymentDiagnostics.jsx";
 
 const ROLE_UI_PERMISSIONS = {
   admin: new Set(["builder", "console", "runtime", "queue", "registry", "governance", "identity"]),
@@ -68,6 +69,8 @@ export default function App() {
     }
   }, [activeView, allowedViews]);
 
+  const [diagnosticsOpen, setDiagnosticsOpen] = React.useState(false);
+
   function handleIdentityChange(nextState) {
     setIdentityState(nextState);
     setApiKeyDraft(nextState.apiKey || "");
@@ -101,6 +104,9 @@ export default function App() {
               <span style={{ marginLeft: 8, fontSize: 12, color: "#8fa0b0" }}>
                 Env: {import.meta.env.VITE_DEPLOY_ENV || "local"}
               </span>
+              <button className="workflow-button" style={{ marginLeft: 12 }} onClick={() => setDiagnosticsOpen(true)}>
+                View diagnostics
+              </button>
             </div>
           ) : (
             <div className="deploy-banner checking">Checking deployment...</div>
@@ -147,6 +153,7 @@ export default function App() {
         {activeView === "governance" ? <PolicyManagementDashboard /> : null}
         {activeView === "identity" ? <IdentityManagementDashboard identityState={identityState} onIdentityChange={handleIdentityChange} /> : null}
       </main>
+      <DeploymentDiagnostics open={diagnosticsOpen} onClose={() => setDiagnosticsOpen(false)} />
     </div>
   );
 }

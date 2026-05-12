@@ -1,0 +1,21 @@
+{
+  "dashboard": {
+    "id": null,
+    "uid": "orchestration-throughput",
+    "title": "Orchestration Throughput",
+    "schemaVersion": 37,
+    "version": 1,
+    "refresh": "15s",
+    "panels": [
+      {
+        "type": "timeseries",
+        "title": "Executions Per Minute",
+        "gridPos": { "h": 8, "w": 24, "x": 0, "y": 0 },
+        "targets": [
+          { "expr": "sum(rate(orchestrator_executions_total[1m]))", "refId": "A" }
+        ]
+      }
+    ]
+  },
+  "overwrite": false
+}

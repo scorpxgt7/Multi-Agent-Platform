@@ -1,0 +1,33 @@
+name: Deploy to Staging
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main ]
+
+jobs:
+  deploy-staging:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build frontend (staging)
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+        env:
+          VITE_DEPLOY_ENV: staging
+        run: |
+          npm ci
+          VITE_DEPLOY_ENV=staging npm run build
+
+      - name: Deploy to staging via SSH
+        uses: appleboy/ssh-action@v0.1.9
+        with:
+          host: ${{ secrets.STAGING_DEPLOY_HOST }}
+          username: ${{ secrets.STAGING_DEPLOY_USER }}
+          key: ${{ secrets.STAGING_SSH_PRIVATE_KEY }}
+          port: ${{ secrets.STAGING_DEPLOY_PORT || '22' }}
+          script: |
+            cd '${{ secrets.STAGING_DEPLOY_PATH }}' || true
+            DEPLOY_ENV=staging bash ./deploy/deploy_vps.sh
