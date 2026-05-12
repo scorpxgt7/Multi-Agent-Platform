@@ -109,6 +109,30 @@ textarea {
   gap: 6px;
 }
 
+.deploy-banner {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border-radius: 8px;
+  font-size: 13px;
+}
+.deploy-banner.ok {
+  background: #052e16;
+  color: #34d399;
+  border: 1px solid rgba(52, 211, 153, 0.12);
+}
+.deploy-banner.down {
+  background: #2d0606;
+  color: #f87171;
+  border: 1px solid rgba(248, 113, 113, 0.12);
+}
+.deploy-banner.checking {
+  background: #0e1720;
+  color: #8ab4d6;
+  border: 1px solid #233244;
+}
+
 .app-brand h1 {
   margin: 0;
   font-size: clamp(26px, 2.8vw, 40px);

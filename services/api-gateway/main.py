@@ -1,12 +1,57 @@
 import os
 from typing import Any
+import time
+from collections import defaultdict
 
 import httpx
 from fastapi import FastAPI, HTTPException, Request
+from fastapi.middleware.cors import CORSMiddleware
+from starlette.middleware.base import BaseHTTPMiddleware
 
 from shared.utils.security import build_operator_context
 
 app = FastAPI(title="api-gateway", version="1.0.0")
+
+# Production-safe CORS handling (configure via CORS_ALLOWED_ORIGINS env var)
+origins_env = os.getenv("CORS_ALLOWED_ORIGINS", "")
+_origins = [o.strip() for o in origins_env.split(",") if o.strip()] if origins_env else []
+if _origins:
+    app.add_middleware(CORSMiddleware, allow_origins=_origins, allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
+
+
+# Simple in-process rate limit scaffold (single-process, intended as a starting point)
+class SimpleRateLimiter(BaseHTTPMiddleware):
+    def __init__(self, app, max_requests: int = 120, window_seconds: int = 60):
+        super().__init__(app)
+        self.max_requests = int(os.getenv("RATE_LIMIT_REQUESTS", max_requests))
+        self.window = int(os.getenv("RATE_LIMIT_WINDOW", window_seconds))
+        self._clients = defaultdict(lambda: {"count": 0, "ts": time.time()})
+
+    async def dispatch(self, request, call_next):
+        # Don't rate limit health checks
+        if request.url.path.startswith("/health"):
+            return await call_next(request)
+        client_ip = request.client.host if request.client else "unknown"
+        entry = self._clients[client_ip]
+        now = time.time()
+        if now - entry["ts"] > self.window:
+            entry["ts"] = now
+            entry["count"] = 0
+        entry["count"] += 1
+        if entry["count"] > self.max_requests:
+            from fastapi.responses import JSONResponse
+            return JSONResponse(status_code=429, content={"detail": "rate_limit_exceeded"})
+        response = await call_next(request)
+        try:
+            response.headers["X-RateLimit-Limit"] = str(self.max_requests)
+            response.headers["X-RateLimit-Remaining"] = str(max(0, self.max_requests - entry["count"]))
+        except Exception:
+            pass
+        return response
+
+
+# Attach rate limiter (scaffold)
+app.add_middleware(SimpleRateLimiter)
 
 AGENT_SERVICE_BASE = os.getenv("AGENT_SERVICE_URL", "http://agent-service:8102")
 POLICY_SERVICE_BASE = os.getenv("POLICY_SERVICE_URL", "http://policy-service:8103")

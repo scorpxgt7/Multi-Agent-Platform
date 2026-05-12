@@ -40,6 +40,25 @@ export default function App() {
   const [identityState, setIdentityState] = React.useState(() => readIdentityState());
   const [apiKeyDraft, setApiKeyDraft] = React.useState(() => readIdentityState().apiKey || "");
 
+  const [deployStatus, setDeployStatus] = React.useState({ checked: false, ok: false });
+  React.useEffect(() => {
+    let mounted = true;
+    async function check() {
+      try {
+        const res = await fetch("/api/health", { cache: "no-store" });
+        if (!mounted) return;
+        setDeployStatus({ checked: true, ok: res.ok });
+      } catch (e) {
+        if (!mounted) return;
+        setDeployStatus({ checked: true, ok: false });
+      }
+    }
+    check();
+    return () => {
+      mounted = false;
+    };
+  }, []);
+
   const operatorRole = identityState.operator?.role || "";
   const allowedViews = operatorRole ? ROLE_UI_PERMISSIONS[operatorRole] || ROLE_UI_PERMISSIONS.viewer : new Set(["identity"]);
 
@@ -76,6 +95,16 @@ export default function App() {
         <div className="app-brand">
           <p className="app-kicker">Visual AI Workforce Builder</p>
           <h1>Governed orchestration graph designer</h1>
+          {deployStatus.checked ? (
+            <div className={`deploy-banner ${deployStatus.ok ? "ok" : "down"}`}>
+              {deployStatus.ok ? "Deployment: OK" : "Deployment: Issues detected"}
+              <span style={{ marginLeft: 8, fontSize: 12, color: "#8fa0b0" }}>
+                Env: {import.meta.env.VITE_DEPLOY_ENV || "local"}
+              </span>
+            </div>
+          ) : (
+            <div className="deploy-banner checking">Checking deployment...</div>
+          )}
         </div>
         <div className="identity-header">
           <select value={identityState.activeOrganizationId || ""} onChange={handleSwitchOrganization}>
