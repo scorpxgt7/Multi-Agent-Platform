@@ -177,12 +177,22 @@ try {
     smokeBaseUrl = `http://${host}:${address.port}`;
   }
 
-  const edgePath = await resolveEdgePath();
+  let edgePath = null;
   try {
-    const dom = await dumpDom(edgePath, smokeBaseUrl);
-    assertMarkers(dom);
-  } catch (browserError) {
-    console.warn(browserError.message || String(browserError));
+    edgePath = await resolveEdgePath();
+  } catch {
+    // Edge not found — we'll fall back to static build assertions below.
+  }
+
+  if (edgePath) {
+    try {
+      const dom = await dumpDom(edgePath, smokeBaseUrl);
+      assertMarkers(dom);
+    } catch (browserError) {
+      console.warn(browserError.message || String(browserError));
+      await assertBuildFallback();
+    }
+  } else {
     await assertBuildFallback();
   }
 
