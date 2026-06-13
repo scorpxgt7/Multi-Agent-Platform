@@ -25,6 +25,12 @@ if grep -q "replace-with-a-strong-secret" "$TARGET"; then
   echo "Generated NEXUS_API_KEY"
 fi
 
+if grep -q "replace-with-bootstrap-secret" "$TARGET"; then
+  BOOTSTRAP_SECRET=$(openssl rand -hex 32)
+  sed -i "s/replace-with-bootstrap-secret/$BOOTSTRAP_SECRET/g" "$TARGET"
+  echo "Generated BOOTSTRAP_TOKEN"
+fi
+
 if grep -q "replace-with-strong-password" "$TARGET"; then
   PSQL_PASS=$(openssl rand -hex 16)
   sed -i "s/replace-with-strong-password/$PSQL_PASS/g" "$TARGET"

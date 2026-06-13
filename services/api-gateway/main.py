@@ -1,4 +1,6 @@
+import logging
 import os
+import secrets
 from typing import Any
 import time
 from collections import defaultdict, deque
@@ -11,6 +13,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from shared.utils.security import build_operator_context
 
 app = FastAPI(title="api-gateway", version="1.0.0")
+LOGGER = logging.getLogger("api-gateway")
 
 # Production-safe CORS handling (configure via CORS_ALLOWED_ORIGINS env var)
 origins_env = os.getenv("CORS_ALLOWED_ORIGINS", "")
@@ -109,9 +112,19 @@ def forward_headers(identity: dict[str, Any] | None):
     return headers
 
 
-async def forward(method: str, target: str, *, identity: dict[str, Any] | None = None, payload: dict[str, Any] | None = None):
+async def forward(
+    method: str,
+    target: str,
+    *,
+    identity: dict[str, Any] | None = None,
+    payload: dict[str, Any] | None = None,
+    extra_headers: dict[str, str] | None = None,
+):
+    headers = forward_headers(identity)
+    if extra_headers:
+        headers.update(extra_headers)
     async with httpx.AsyncClient(timeout=FORWARD_TIMEOUT) as client:
-        response = await client.request(method, target, json=payload, headers=forward_headers(identity))
+        response = await client.request(method, target, json=payload, headers=headers)
     detail = None
     try:
         detail = response.json()
@@ -128,8 +141,22 @@ def health():
 
 
 @app.post("/v1/organizations/bootstrap")
-async def bootstrap_organization(payload: dict[str, Any]):
-    return await forward("POST", f"{ROUTES['organizations']}/bootstrap", payload=payload)
+async def bootstrap_organization(payload: dict[str, Any], request: Request):
+    expected_token = os.getenv("BOOTSTRAP_TOKEN", "").strip()
+    provided_token = request.headers.get("x-bootstrap-token", "").strip()
+    if not expected_token or not secrets.compare_digest(provided_token, expected_token):
+        LOGGER.warning(
+            "bootstrap rejected at gateway client=%s configured=%s",
+            request.client.host if request.client else "unknown",
+            bool(expected_token),
+        )
+        raise HTTPException(status_code=401, detail="bootstrap_token_required")
+    return await forward(
+        "POST",
+        f"{ROUTES['organizations']}/bootstrap",
+        payload=payload,
+        extra_headers={"x-bootstrap-token": provided_token},
+    )
 
 
 @app.get("/v1/organizations")
