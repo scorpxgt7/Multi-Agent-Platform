@@ -1,7 +1,9 @@
+import logging
+import os
 import secrets
 
 from fastapi import Depends, FastAPI, HTTPException, Request
-from sqlalchemy import delete, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session
 
 from shared.models import Agent, AgentSkill, AuditLog, Operator, OperatorRole, Organization, Role, RoleSkill, Team, TeamAgent
@@ -15,6 +17,7 @@ settings = load_settings("agent-service", 8102)
 SessionLocal = create_session_factory(settings.database_url)
 events = EventBus(settings.redis_url, settings.event_channel)
 app = FastAPI(title="agent-service", version="1.0.0")
+LOGGER = logging.getLogger("agent-service")
 
 
 def get_db():
@@ -88,6 +91,34 @@ def create_operator_record(db: Session, *, organization_id: str, name: str, emai
     return operator
 
 
+def audit_bootstrap_failure(db: Session, *, reason: str, request: Request, organization_slug: str | None = None):
+    db.add(
+        AuditLog(
+            event_type="organization.bootstrap_failed",
+            actor_type="anonymous",
+            actor_id=request.client.host if request.client else "unknown",
+            resource_type="organization",
+            resource_id=organization_slug or "bootstrap",
+            payload={"reason": reason, "organization_slug": organization_slug},
+        )
+    )
+    db.commit()
+    LOGGER.warning("bootstrap failed reason=%s organization_slug=%s", reason, organization_slug)
+
+
+def require_bootstrap_token(request: Request, db: Session, organization_slug: str | None = None):
+    expected_token = os.getenv("BOOTSTRAP_TOKEN", "").strip()
+    provided_token = request.headers.get("x-bootstrap-token", "").strip()
+    if not expected_token or not secrets.compare_digest(provided_token, expected_token):
+        audit_bootstrap_failure(
+            db,
+            reason="invalid_bootstrap_token" if expected_token else "bootstrap_token_not_configured",
+            request=request,
+            organization_slug=organization_slug,
+        )
+        raise HTTPException(status_code=401, detail="bootstrap_token_required")
+
+
 def request_organization_id(request: Request) -> str:
     return require_request_organization(request)
 
@@ -98,7 +129,14 @@ def health():
 
 
 @app.post("/v1/organizations/bootstrap")
-def bootstrap_organization(payload: OrganizationBootstrap, db: Session = Depends(get_db)):
+def bootstrap_organization(payload: OrganizationBootstrap, request: Request, db: Session = Depends(get_db)):
+    require_bootstrap_token(request, db, payload.organization_slug)
+    organization_count = db.scalar(select(func.count()).select_from(Organization)) or 0
+    if organization_count > 0:
+        audit_bootstrap_failure(
+            db, reason="organizations_already_exist", request=request, organization_slug=payload.organization_slug
+        )
+        raise HTTPException(status_code=403, detail="bootstrap_closed")
     existing = db.scalar(select(Organization).where(Organization.slug == payload.organization_slug))
     if existing:
         raise HTTPException(status_code=409, detail="organization_slug_exists")

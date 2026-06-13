@@ -5,10 +5,11 @@ set -euo pipefail
 NGINX_PORT=${NGINX_PORT:-80}
 GATEWAY=${GATEWAY:-http://localhost:${NGINX_PORT}/api}
 OUT_FILE=${OUT_FILE:-.persistence_seed.json}
+BOOTSTRAP_TOKEN=${BOOTSTRAP_TOKEN:?BOOTSTRAP_TOKEN is required for organization bootstrap}
 SUFFIX=$(date +%s)
 
 echo "Seeding persistence test via $GATEWAY"
-curl -sS -X POST "$GATEWAY/v1/organizations/bootstrap" -H "Content-Type: application/json" -d \
+curl -sS -X POST "$GATEWAY/v1/organizations/bootstrap" -H "Content-Type: application/json" -H "x-bootstrap-token: $BOOTSTRAP_TOKEN" -d \
   "{\"organization_name\": \"persistence-test-$SUFFIX\", \"organization_slug\": \"persistence-test-$SUFFIX\", \"workspace_name\": \"persistence-workspace-$SUFFIX\", \"workspace_slug\": \"persistence-workspace-$SUFFIX\", \"operator_name\": \"Seed Admin\", \"operator_email\": \"seed-admin-$SUFFIX@example.com\"}" > "$OUT_FILE"
 
 echo "Seed written to $OUT_FILE"
