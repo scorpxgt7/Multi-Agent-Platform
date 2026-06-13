@@ -22,35 +22,117 @@ if _origins:
     app.add_middleware(CORSMiddleware, allow_origins=_origins, allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
 
 
-# Simple in-process rate limit scaffold (single-process, intended as a starting point)
+# Rate limiting configuration:
+# - Production/multi-instance deployments should set REDIS_URL so all gateway replicas
+#   share counters through Redis.
+# - Without REDIS_URL, the limiter uses an in-process fallback for local development
+#   and single-process smoke tests only; counters are not shared across processes.
 class SimpleRateLimiter(BaseHTTPMiddleware):
     def __init__(self, app, max_requests: int = 120, window_seconds: int = 60):
         super().__init__(app)
         self.max_requests = int(os.getenv("RATE_LIMIT_REQUESTS", max_requests))
         self.window = int(os.getenv("RATE_LIMIT_WINDOW", window_seconds))
-        self._clients = defaultdict(lambda: {"count": 0, "ts": time.time()})
+        self.cleanup_interval = int(os.getenv("RATE_LIMIT_CLEANUP_INTERVAL", str(max(60, self.window))))
+        self.trusted_proxies = _parse_trusted_proxies(os.getenv("TRUSTED_PROXY_CIDRS", ""))
+        self.redis_url = os.getenv("REDIS_URL", "").strip()
+        self._redis = None
+        self._clients = defaultdict(lambda: {"count": 0, "ts": time.time(), "last_seen": time.time()})
+        self._last_cleanup = time.time()
 
     async def dispatch(self, request, call_next):
         # Don't rate limit health checks
         if request.url.path.startswith("/health"):
             return await call_next(request)
-        client_ip = request.client.host if request.client else "unknown"
-        entry = self._clients[client_ip]
+
+        client_ip = self._client_ip(request)
         now = time.time()
+        if self.redis_url:
+            count, reset_at = await self._increment_redis(client_ip, now)
+        else:
+            count, reset_at = self._increment_memory(client_ip, now)
+
+        if count > self.max_requests:
+            from fastapi.responses import JSONResponse
+            return JSONResponse(status_code=429, content={"detail": "rate_limit_exceeded"}, headers=self._headers(count, reset_at))
+
+        response = await call_next(request)
+        response.headers.update(self._headers(count, reset_at))
+        return response
+
+    def _client_ip(self, request: Request) -> str:
+        peer_host = request.client.host if request.client else "unknown"
+        if self._is_trusted_proxy(peer_host):
+            forwarded_for = request.headers.get("x-forwarded-for", "")
+            first_forwarded = forwarded_for.split(",", 1)[0].strip()
+            if first_forwarded:
+                return first_forwarded
+            real_ip = request.headers.get("x-real-ip", "").strip()
+            if real_ip:
+                return real_ip
+        return peer_host
+
+    def _is_trusted_proxy(self, peer_host: str) -> bool:
+        try:
+            import ipaddress
+            peer_ip = ipaddress.ip_address(peer_host)
+        except ValueError:
+            return False
+        return any(peer_ip in network for network in self.trusted_proxies)
+
+    async def _increment_redis(self, client_ip: str, now: float) -> tuple[int, int]:
+        redis_client = await self._redis_client()
+        bucket = int(now // self.window)
+        key = f"api-gateway:rate-limit:{client_ip}:{bucket}"
+        count = await redis_client.incr(key)
+        if count == 1:
+            await redis_client.expire(key, self.window * 2)
+        reset_at = (bucket + 1) * self.window
+        return int(count), int(reset_at)
+
+    async def _redis_client(self):
+        if self._redis is None:
+            import redis.asyncio as redis
+            self._redis = redis.from_url(self.redis_url, encoding="utf-8", decode_responses=True)
+        return self._redis
+
+    def _increment_memory(self, client_ip: str, now: float) -> tuple[int, int]:
+        self._cleanup_stale_clients(now)
+        entry = self._clients[client_ip]
         if now - entry["ts"] > self.window:
             entry["ts"] = now
             entry["count"] = 0
         entry["count"] += 1
-        if entry["count"] > self.max_requests:
-            from fastapi.responses import JSONResponse
-            return JSONResponse(status_code=429, content={"detail": "rate_limit_exceeded"})
-        response = await call_next(request)
-        try:
-            response.headers["X-RateLimit-Limit"] = str(self.max_requests)
-            response.headers["X-RateLimit-Remaining"] = str(max(0, self.max_requests - entry["count"]))
-        except Exception:
-            pass
-        return response
+        entry["last_seen"] = now
+        return int(entry["count"]), int(entry["ts"] + self.window)
+
+    def _cleanup_stale_clients(self, now: float | None = None) -> int:
+        now = time.time() if now is None else now
+        if now - self._last_cleanup < self.cleanup_interval:
+            return 0
+        stale_after = self.window + self.cleanup_interval
+        stale_keys = [key for key, entry in self._clients.items() if now - entry.get("last_seen", entry["ts"]) > stale_after]
+        for key in stale_keys:
+            self._clients.pop(key, None)
+        self._last_cleanup = now
+        return len(stale_keys)
+
+    def _headers(self, count: int, reset_at: int) -> dict[str, str]:
+        return {
+            "X-RateLimit-Limit": str(self.max_requests),
+            "X-RateLimit-Remaining": str(max(0, self.max_requests - count)),
+            "X-RateLimit-Reset": str(reset_at),
+        }
+
+
+def _parse_trusted_proxies(value: str):
+    import ipaddress
+    networks = []
+    for raw_proxy in value.split(","):
+        proxy = raw_proxy.strip()
+        if not proxy:
+            continue
+        networks.append(ipaddress.ip_network(proxy, strict=False))
+    return tuple(networks)
 
 
 # Attach rate limiter (scaffold)
