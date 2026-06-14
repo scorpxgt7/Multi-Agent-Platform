@@ -208,6 +208,7 @@ class MemoryRecord(Base):
     __tablename__ = "memory_records"
 
     id: Mapped[str] = mapped_column(String(64), primary_key=True, default=lambda: str(uuid.uuid4()))
+    organization_id: Mapped[str] = mapped_column(String(64), nullable=False, default="", index=True)
     namespace: Mapped[str] = mapped_column(String(64), nullable=False, default="default", index=True)
     scope: Mapped[str] = mapped_column(String(64), nullable=False, default="long_term")
     content: Mapped[str] = mapped_column(Text, nullable=False)
