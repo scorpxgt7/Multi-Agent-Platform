@@ -1,7 +1,10 @@
 from typing import Any, TypedDict
 
+import os
+
 import httpx
 from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import JSONResponse
 
 from execution_store import ExecutionStore
 from queue_store import WorkflowQueueStore
@@ -9,7 +12,7 @@ from shared.schemas import TaskCreate, WorkflowCancelRequest, WorkflowEnqueueReq
 from shared.utils.config import load_settings
 from shared.utils.database import create_session_factory
 from shared.utils.events import EventBus
-from shared.utils.security import require_request_organization, request_scope
+from shared.utils.security import sign_internal_headers, verify_internal_request, require_request_organization, request_scope
 from workflow_compiler import compile_workflow
 from workflow_store import WorkflowStore
 
@@ -27,10 +30,10 @@ workflow_store = WorkflowStore(SessionLocal)
 queue_store = WorkflowQueueStore(SessionLocal, execution_store, workflow_store, events)
 app = FastAPI(title="orchestrator-service", version="1.0.0")
 
-AGENT_SERVICE_URL = "http://agent-service:8102"
-POLICY_SERVICE_URL = "http://policy-service:8103"
-SKILL_SERVICE_URL = "http://skill-service:8101"
-MEMORY_SERVICE_URL = "http://memory-service:8104"
+AGENT_SERVICE_URL = os.getenv("AGENT_SERVICE_URL", "http://agent-service:8102")
+POLICY_SERVICE_URL = os.getenv("POLICY_SERVICE_URL", "http://policy-service:8103")
+SKILL_SERVICE_URL = os.getenv("SKILL_SERVICE_URL", "http://skill-service:8101")
+MEMORY_SERVICE_URL = os.getenv("MEMORY_SERVICE_URL", "http://memory-service:8104")
 
 
 class WorkflowState(TypedDict, total=False):
@@ -56,6 +59,23 @@ class WorkflowState(TypedDict, total=False):
     workflow_deployment: dict[str, Any]
     workflow_progress: dict[str, Any]
     queue_item_id: str
+
+
+def internal_service_headers(state: WorkflowState, *, method: str, path: str) -> dict[str, str]:
+    organization_id = state.get("organization_id", "")
+    operator_id = state.get("actor_id", "")
+    operator_role = state.get("context", {}).get("operator_role", "operator")
+    headers = {"x-organization-id": organization_id, "x-operator-id": operator_id, "x-operator-role": operator_role}
+    headers.update(
+        sign_internal_headers(
+            method=method,
+            path=path,
+            organization_id=organization_id,
+            operator_id=operator_id,
+            operator_role=operator_role,
+        )
+    )
+    return headers
 
 
 def transition(state: WorkflowState, *, status: str, step: str, event_type: str, agent_name: str = "", payload: dict[str, Any] | None = None):
@@ -184,10 +204,17 @@ async def execute_workflow_graph(initial_state: WorkflowState) -> WorkflowState:
 
 
 async def evaluate_policy(client: httpx.AsyncClient, state: WorkflowState, payload: dict[str, Any]) -> dict[str, Any]:
-    response = await client.post(f"{POLICY_SERVICE_URL}/v1/policies/evaluate", json=payload)
-    if response.is_success:
-        return response.json().get("decision", {})
-    return {"approved": True, "requires_approval": False, "violations": []}
+    try:
+        response = await client.post(f"{POLICY_SERVICE_URL}/v1/policies/evaluate", json=payload, headers=internal_service_headers(state, method="POST", path="/v1/policies/evaluate"))
+        if response.is_success:
+            return response.json().get("decision", {})
+    except Exception:
+        pass
+    return {
+        "approved": False,
+        "requires_approval": True,
+        "violations": [{"type": "policy_unavailable", "message": "Policy service did not return an approval decision."}],
+    }
 
 
 def set_policy_violation(state: WorkflowState, *, stage: str, decision: dict[str, Any], payload: dict[str, Any]):
@@ -247,11 +274,10 @@ async def head_admin(state: WorkflowState):
         agent_name="head-admin",
         payload={"message": "Head Admin accepted task and is loading team context."},
     )
-    internal_headers = {"x-organization-id": state["organization_id"], "x-operator-id": state.get("actor_id", ""), "x-operator-role": state.get("context", {}).get("operator_role", "operator")}
-    async with httpx.AsyncClient(timeout=20.0, headers=internal_headers) as client:
+    async with httpx.AsyncClient(timeout=20.0) as client:
         runtime_config = state.get("runtime_config", {})
         try:
-            team_response = await client.get(f"{AGENT_SERVICE_URL}/v1/teams/{state['team_id']}")
+            team_response = await client.get(f"{AGENT_SERVICE_URL}/v1/teams/{state['team_id']}", headers=internal_service_headers(state, method="GET", path=f"/v1/teams/{state['team_id']}"))
             if team_response.is_success:
                 state["team"] = team_response.json().get("team", {})
         except Exception:
@@ -259,6 +285,7 @@ async def head_admin(state: WorkflowState):
         try:
             await client.post(
                 f"{MEMORY_SERVICE_URL}/v1/memory/write",
+                headers=internal_service_headers(state, method="POST", path="/v1/memory/write"),
                 json={
                     "namespace": state["team_id"],
                     "scope": "short_term",
@@ -336,8 +363,7 @@ async def finance_agent(state: WorkflowState):
         agent_name="finance-agent",
         payload={"message": "Finance agent is evaluating the task."},
     )
-    internal_headers = {"x-organization-id": state["organization_id"], "x-operator-id": state.get("actor_id", ""), "x-operator-role": state.get("context", {}).get("operator_role", "operator")}
-    async with httpx.AsyncClient(timeout=20.0, headers=internal_headers) as client:
+    async with httpx.AsyncClient(timeout=20.0) as client:
         runtime_config = state.get("runtime_config", {})
         skill_id = state.get("context", {}).get("skill_id")
         if not skill_id:
@@ -388,7 +414,7 @@ async def finance_agent(state: WorkflowState):
             "recommendation": "Proceed with supervised execution and operator approval.",
             "skill_result": skill_payload,
         }
-        response = await client.post(f"{SKILL_SERVICE_URL}/skills/{skill_id}/execute", json=skill_payload)
+        response = await client.post(f"{SKILL_SERVICE_URL}/skills/{skill_id}/execute", json=skill_payload, headers=internal_service_headers(state, method="POST", path=f"/skills/{skill_id}/execute"))
         if response.status_code == 403:
             detail = response.json().get("detail", {})
             decision = detail.get("decision", {}) if isinstance(detail, dict) else {}
@@ -452,12 +478,12 @@ async def approval_gate(state: WorkflowState):
         agent_name="policy-service",
         payload={"message": "Approval gate is evaluating restrictions and thresholds."},
     )
-    internal_headers = {"x-organization-id": state["organization_id"], "x-operator-id": state.get("actor_id", ""), "x-operator-role": state.get("context", {}).get("operator_role", "operator")}
-    async with httpx.AsyncClient(timeout=20.0, headers=internal_headers) as client:
+    async with httpx.AsyncClient(timeout=20.0) as client:
         try:
             governance = state.get("team", {}).get("governance_config", {})
             response = await client.post(
                 f"{POLICY_SERVICE_URL}/v1/policies/evaluate",
+                headers=internal_service_headers(state, method="POST", path="/v1/policies/evaluate"),
                 json={
                     "role_id": state.get("context", {}).get("role_id"),
                     "team_id": state["team_id"],
@@ -474,7 +500,7 @@ async def approval_gate(state: WorkflowState):
             )
             approval = response.json().get("decision", {})
         except Exception:
-            approval = {"approved": True, "requires_approval": True, "restricted_skills": []}
+            approval = {"approved": False, "requires_approval": True, "violations": [{"type": "policy_unavailable"}]}
     state["approval"] = approval
     execution_store.append_event(
         execution_id=state["execution_id"],
@@ -548,11 +574,11 @@ async def finalize(state: WorkflowState):
         agent_name="head-admin",
         payload={"message": "Persisting final long-term memory and closing execution."},
     )
-    internal_headers = {"x-organization-id": state["organization_id"], "x-operator-id": state.get("actor_id", ""), "x-operator-role": state.get("context", {}).get("operator_role", "operator")}
-    async with httpx.AsyncClient(timeout=20.0, headers=internal_headers) as client:
+    async with httpx.AsyncClient(timeout=20.0) as client:
         try:
             await client.post(
                 f"{MEMORY_SERVICE_URL}/v1/memory/write",
+                headers=internal_service_headers(state, method="POST", path="/v1/memory/write"),
                 json={
                     "namespace": state["team_id"],
                     "scope": "long_term",
@@ -650,6 +676,16 @@ def build_graph():
 
 
 GRAPH = build_graph()
+
+
+@app.middleware("http")
+async def enforce_internal_auth(request: Request, call_next):
+    if request.url.path != "/health":
+        try:
+            verify_internal_request(request)
+        except HTTPException as exc:
+            return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
+    return await call_next(request)
 
 
 @app.get("/health")
