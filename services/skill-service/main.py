@@ -1,7 +1,8 @@
 import os
 
 import httpx
-from fastapi import Depends, FastAPI, HTTPException
+from fastapi import Depends, FastAPI, HTTPException, Request
+from fastapi.responses import JSONResponse
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -12,6 +13,7 @@ from shared.schemas import SkillCreate, SkillExecuteRequest
 from shared.utils.config import load_settings
 from shared.utils.database import create_session_factory
 from shared.utils.events import EventBus
+from shared.utils.security import redact_sensitive, sign_internal_headers, verify_internal_request
 
 settings = load_settings("skill-service", 8101)
 SessionLocal = create_session_factory(settings.database_url)
@@ -19,6 +21,16 @@ events = EventBus(settings.redis_url, settings.event_channel)
 provider, provider_status = get_provider(settings)
 app = FastAPI(title="skill-service", version="1.0.0")
 POLICY_SERVICE_URL = os.getenv("POLICY_SERVICE_URL", "http://policy-service:8103")
+
+
+@app.middleware("http")
+async def enforce_internal_auth(request: Request, call_next):
+    if request.url.path != "/health":
+        try:
+            verify_internal_request(request)
+        except HTTPException as exc:
+            return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
+    return await call_next(request)
 
 
 def get_db():
@@ -78,7 +90,12 @@ def execute_skill(skill_id: str, payload: SkillExecuteRequest, db: Session = Dep
         "context": payload.context,
     }
     try:
-        response = httpx.post(f"{POLICY_SERVICE_URL}/v1/policies/evaluate", json=policy_payload, timeout=20.0)
+        organization_id = payload.context.get("organization_id", "")
+        operator_id = payload.context.get("operator_id", payload.actor_id)
+        operator_role = payload.context.get("operator_role", "operator")
+        headers = {"x-organization-id": organization_id, "x-operator-id": operator_id, "x-operator-role": operator_role}
+        headers.update(sign_internal_headers(method="POST", path="/v1/policies/evaluate", organization_id=organization_id, operator_id=operator_id, operator_role=operator_role))
+        response = httpx.post(f"{POLICY_SERVICE_URL}/v1/policies/evaluate", json=policy_payload, headers=headers, timeout=20.0)
         response.raise_for_status()
         decision = response.json().get("decision", {})
     except httpx.HTTPError as error:
@@ -107,8 +124,8 @@ def execute_skill(skill_id: str, payload: SkillExecuteRequest, db: Session = Dep
 
     execution_payload = {
         "input": payload.input,
-        "context": payload.context,
-        "tools": skill.config.get("tools", []),
+        "context": redact_sensitive(payload.context),
+        "tools": redact_sensitive(skill.config.get("tools", [])),
     }
     active_provider_status = dict(provider_status)
     try:
@@ -139,7 +156,15 @@ def execute_skill(skill_id: str, payload: SkillExecuteRequest, db: Session = Dep
             "reason": active_provider_status.get("reason"),
         },
     }
-    db.add(AuditLog(event_type="skill.executed", actor_type="agent", actor_id=payload.actor_id, resource_type="skill", resource_id=skill.id, payload=result))
+    audit_result = {
+        "request_id": payload.context.get("request_id"),
+        "skill_id": skill.id,
+        "version": skill.version,
+        "execution_type": skill.execution_type.value,
+        "provider": result["provider"],
+        "status": "completed",
+    }
+    db.add(AuditLog(event_type="skill.executed", actor_type="agent", actor_id=payload.actor_id, resource_type="skill", resource_id=skill.id, payload=redact_sensitive(audit_result)))
     db.commit()
-    events.emit("skill.executed", result)
+    events.emit("skill.executed", redact_sensitive(audit_result))
     return {"ok": True, "result": result}

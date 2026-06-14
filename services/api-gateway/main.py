@@ -10,7 +10,7 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.base import BaseHTTPMiddleware
 
-from shared.utils.security import build_operator_context
+from shared.utils.security import build_operator_context, sign_internal_headers
 
 app = FastAPI(title="api-gateway", version="1.0.0")
 LOGGER = logging.getLogger("api-gateway")
@@ -169,8 +169,13 @@ async def resolve_identity(request: Request, *, required_permission: str | None 
             return None
         raise HTTPException(status_code=401, detail="api_key_required")
 
+    service_identity = {"organization_id": "gateway", "operator_id": "gateway", "operator_role": "service"}
     async with httpx.AsyncClient(timeout=IDENTITY_TIMEOUT) as client:
-        response = await client.get(f"{AGENT_SERVICE_BASE}/internal/operators/resolve", params={"api_key": api_key})
+        response = await client.get(
+            f"{AGENT_SERVICE_BASE}/internal/operators/resolve",
+            params={"api_key": api_key},
+            headers=forward_headers(service_identity, method="GET", path="/internal/operators/resolve"),
+        )
     if response.status_code >= 400:
         raise HTTPException(status_code=401, detail="invalid_api_key")
     payload = response.json()
@@ -181,8 +186,10 @@ async def resolve_identity(request: Request, *, required_permission: str | None 
     return context
 
 
-def forward_headers(identity: dict[str, Any] | None):
+def forward_headers(identity: dict[str, Any] | None, *, method: str = "GET", path: str = "/"):
     headers = {"Content-Type": "application/json"}
+    if identity is None and os.getenv("INTERNAL_AUTH_SECRET", "").strip():
+        identity = {"organization_id": "gateway", "operator_id": "gateway", "operator_role": "service"}
     if identity:
         headers.update(
             {
@@ -190,6 +197,15 @@ def forward_headers(identity: dict[str, Any] | None):
                 "x-operator-id": identity["operator_id"],
                 "x-operator-role": identity["operator_role"],
             }
+        )
+        headers.update(
+            sign_internal_headers(
+                method=method,
+                path=path,
+                organization_id=identity["organization_id"] or "",
+                operator_id=identity["operator_id"] or "",
+                operator_role=identity["operator_role"] or "",
+            )
         )
     return headers
 
@@ -202,7 +218,8 @@ async def forward(
     payload: dict[str, Any] | None = None,
     extra_headers: dict[str, str] | None = None,
 ):
-    headers = forward_headers(identity)
+    target_path = httpx.URL(target).path
+    headers = forward_headers(identity, method=method, path=target_path)
     if extra_headers:
         headers.update(extra_headers)
     async with httpx.AsyncClient(timeout=FORWARD_TIMEOUT) as client:
@@ -237,6 +254,7 @@ async def bootstrap_organization(payload: dict[str, Any], request: Request):
         "POST",
         f"{ROUTES['organizations']}/bootstrap",
         payload=payload,
+        identity={"organization_id": "bootstrap", "operator_id": "bootstrap", "operator_role": "admin"},
         extra_headers={"x-bootstrap-token": provided_token},
     )
 

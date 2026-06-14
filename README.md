@@ -1,8 +1,13 @@
 # Multi-Agent Platform
 
-Phase 1 of a multi-agent orchestration workspace. The repo now has a runnable
-React app scaffold and a canonical platform shell that works without any
-external model provider.
+Integrated alpha/pre-production MVP for a multi-agent orchestration workspace. The repo includes a runnable React app, a Node backend adapter, a FastAPI microservice stack, workflow deployment/queueing, and monitoring scaffolding. It can run local/simulated workflows without any external model provider, but production use still requires the security and readiness gates in `docs/production_readiness.md`.
+
+## Current maturity
+
+- Frontend and local simulation: runnable MVP.
+- Node backend adapter and persisted run history: functional MVP.
+- FastAPI service stack, queue, policy, memory, and workflow deployment: integrated alpha.
+- Production security posture: improving, but still gated by `docs/production_readiness.md`.
 
 ## Current structure
 

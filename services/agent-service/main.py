@@ -3,6 +3,7 @@ import os
 import secrets
 
 from fastapi import Depends, FastAPI, HTTPException, Request
+from fastapi.responses import JSONResponse
 from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session
 
@@ -11,13 +12,23 @@ from shared.schemas import AgentCreate, AgentUpdate, OperatorCreate, OperatorUpd
 from shared.utils.config import load_settings
 from shared.utils.database import create_session_factory
 from shared.utils.events import EventBus
-from shared.utils.security import operator_role_value, require_request_organization, request_scope, role_permissions
+from shared.utils.security import verify_internal_request, operator_role_value, require_request_organization, request_scope, role_permissions
 
 settings = load_settings("agent-service", 8102)
 SessionLocal = create_session_factory(settings.database_url)
 events = EventBus(settings.redis_url, settings.event_channel)
 app = FastAPI(title="agent-service", version="1.0.0")
 LOGGER = logging.getLogger("agent-service")
+
+
+@app.middleware("http")
+async def enforce_internal_auth(request: Request, call_next):
+    if request.url.path != "/health":
+        try:
+            verify_internal_request(request)
+        except HTTPException as exc:
+            return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
+    return await call_next(request)
 
 
 def get_db():
@@ -117,6 +128,26 @@ def require_bootstrap_token(request: Request, db: Session, organization_slug: st
             organization_slug=organization_slug,
         )
         raise HTTPException(status_code=401, detail="bootstrap_token_required")
+
+
+def ensure_team_agents_in_org(db: Session, organization_id: str, agent_ids: list[str]) -> None:
+    if not agent_ids:
+        return
+    found = set(db.scalars(select(Agent.id).where(Agent.organization_id == organization_id, Agent.id.in_(agent_ids))).all())
+    missing = [agent_id for agent_id in agent_ids if agent_id not in found]
+    if missing:
+        raise HTTPException(status_code=404, detail="agent_reference_not_found")
+
+
+def active_admin_count(db: Session, organization_id: str, *, excluding_operator_id: str | None = None) -> int:
+    query = select(func.count()).select_from(Operator).where(
+        Operator.organization_id == organization_id,
+        Operator.role == OperatorRole.admin.value,
+        Operator.is_active == True,
+    )
+    if excluding_operator_id:
+        query = query.where(Operator.id != excluding_operator_id)
+    return db.scalar(query) or 0
 
 
 def request_organization_id(request: Request) -> str:
@@ -229,6 +260,9 @@ def update_operator(operator_id: str, payload: OperatorUpdate, request: Request,
     operator = db.get(Operator, operator_id)
     if not operator or operator.organization_id != organization_id:
         raise HTTPException(status_code=404, detail="operator_not_found")
+    if operator_role_value(operator.role) == OperatorRole.admin.value and (payload.role != OperatorRole.admin.value or not payload.is_active):
+        if active_admin_count(db, organization_id, excluding_operator_id=operator.id) == 0:
+            raise HTTPException(status_code=400, detail="last_active_admin_required")
     operator.name = payload.name
     operator.email = payload.email
     operator.role = payload.role
@@ -413,6 +447,7 @@ def create_team(payload: TeamCreate, request: Request, db: Session = Depends(get
     team = Team(organization_id=organization_id, name=payload.name, description=payload.description, governance_config=payload.governance_config)
     db.add(team)
     db.flush()
+    ensure_team_agents_in_org(db, organization_id, payload.agent_ids)
     for index, agent_id in enumerate(payload.agent_ids, start=1):
         db.add(TeamAgent(team_id=team.id, agent_id=agent_id, priority=index))
     db.add(
@@ -482,6 +517,7 @@ def update_team(team_id: str, payload: TeamUpdate, request: Request, db: Session
     team.description = payload.description
     team.governance_config = payload.governance_config
 
+    ensure_team_agents_in_org(db, organization_id, payload.agent_ids)
     db.execute(delete(TeamAgent).where(TeamAgent.team_id == team_id))
     db.flush()
     for index, agent_id in enumerate(payload.agent_ids, start=1):

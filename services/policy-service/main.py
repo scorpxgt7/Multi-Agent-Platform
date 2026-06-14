@@ -1,6 +1,7 @@
 from typing import Any
 
 from fastapi import Depends, FastAPI, HTTPException, Request
+from fastapi.responses import JSONResponse
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -9,12 +10,22 @@ from shared.schemas import PolicyCreate, PolicyEvaluationRequest, PolicyUpdate
 from shared.utils.config import load_settings
 from shared.utils.database import create_session_factory
 from shared.utils.events import EventBus
-from shared.utils.security import request_scope
+from shared.utils.security import verify_internal_request, request_scope
 
 settings = load_settings("policy-service", 8103)
 SessionLocal = create_session_factory(settings.database_url)
 events = EventBus(settings.redis_url, settings.event_channel)
 app = FastAPI(title="policy-service", version="1.0.0")
+
+
+@app.middleware("http")
+async def enforce_internal_auth(request: Request, call_next):
+    if request.url.path != "/health":
+        try:
+            verify_internal_request(request)
+        except HTTPException as exc:
+            return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
+    return await call_next(request)
 
 
 def get_db():

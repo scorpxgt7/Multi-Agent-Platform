@@ -103,3 +103,33 @@ def test_agent_bootstrap_denies_after_first_run_and_audits_failure(agent_module)
     assert audit is not None
     assert audit.payload["reason"] == "organizations_already_exist"
     assert audit.payload["organization_slug"] == "second"
+
+
+def test_gateway_forward_headers_include_signed_identity(monkeypatch):
+    monkeypatch.setenv("INTERNAL_AUTH_SECRET", "test-internal-secret")
+    module = load_module("api_gateway_internal_auth_test", "services/api-gateway/main.py")
+
+    headers = module.forward_headers(
+        {"organization_id": "org-1", "operator_id": "op-1", "operator_role": "admin"},
+        method="POST",
+        path="/v1/agents",
+    )
+
+    assert headers["x-organization-id"] == "org-1"
+    assert headers["x-operator-id"] == "op-1"
+    assert headers["x-operator-role"] == "admin"
+    assert headers["x-internal-auth-signature"]
+    assert headers["x-internal-auth-timestamp"]
+    assert headers["x-internal-auth-request-id"]
+
+
+def test_gateway_forward_headers_sign_anonymous_internal_requests(monkeypatch):
+    monkeypatch.setenv("INTERNAL_AUTH_SECRET", "test-internal-secret")
+    module = load_module("api_gateway_anonymous_internal_auth_test", "services/api-gateway/main.py")
+
+    headers = module.forward_headers(None, method="GET", path="/v1/organizations")
+
+    assert headers["x-organization-id"] == "gateway"
+    assert headers["x-operator-id"] == "gateway"
+    assert headers["x-operator-role"] == "service"
+    assert headers["x-internal-auth-signature"]

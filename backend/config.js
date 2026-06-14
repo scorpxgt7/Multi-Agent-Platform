@@ -65,6 +65,23 @@ function normalizePersistenceMode(value) {
   return ["auto", "sqlite", "json"].includes(normalized) ? normalized : "auto";
 }
 
+const PLACEHOLDER_SECRET_VALUES = new Set([
+  "change-me-before-public-deploy",
+  "replace-with-a-strong-secret",
+  "replace-with-bootstrap-secret",
+  "replace-with-internal-auth-secret",
+  "replace-with-strong-password",
+  "admin",
+]);
+
+function isPlaceholderSecret(value) {
+  return PLACEHOLDER_SECRET_VALUES.has(String(value || "").trim());
+}
+
+function isPublicDeployment(config) {
+  return Boolean(config.publicAppUrl) || ["production", "staging"].includes(String(config.nodeEnv || "").toLowerCase());
+}
+
 function isValidUrl(value) {
   try {
     const parsed = new URL(value);
@@ -208,6 +225,10 @@ export function validateConfig(config) {
 
   if (config.authEnabled && config.apiKey.length < 12) {
     warnings.push("NEXUS_API_KEY is set but shorter than 12 characters.");
+  }
+
+  if (isPublicDeployment(config) && (!config.apiKey || isPlaceholderSecret(config.apiKey))) {
+    errors.push("NEXUS_API_KEY must be a non-placeholder secret for public or production deployments.");
   }
 
   if (!config.authEnabled && config.publicAppUrl) {

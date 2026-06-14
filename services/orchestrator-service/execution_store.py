@@ -8,6 +8,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from shared.models import ExecutionEvent, ExecutionRun, ExecutionStatus
+from shared.utils.security import redact_sensitive
 
 
 def now_utc() -> datetime:
@@ -205,9 +206,9 @@ class ExecutionStore:
                     "retry_count": run.retry_count,
                     "delegation_chain": run.delegation_chain,
                     "provider_usage": run.provider_usage,
-                    "context": run.context,
-                    "result_payload": run.result_payload,
-                    "state_snapshot": run.state_snapshot,
+                    "context": redact_sensitive(run.context),
+                    "result_payload": redact_sensitive(run.result_payload),
+                    "state_snapshot": redact_sensitive(run.state_snapshot),
                     "error_message": run.error_message,
                     "started_at": run.started_at.isoformat() if run.started_at else None,
                     "completed_at": run.completed_at.isoformat() if run.completed_at else None,
@@ -220,7 +221,7 @@ class ExecutionStore:
                         "agent_name": event.agent_name,
                         "skill_id": event.skill_id,
                         "provider_name": event.provider_name,
-                        "payload": event.payload,
+                        "payload": redact_sensitive(event.payload),
                         "created_at": event.created_at.isoformat() if event.created_at else None,
                     }
                     for event in events

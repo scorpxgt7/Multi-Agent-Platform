@@ -31,6 +31,12 @@ if grep -q "replace-with-bootstrap-secret" "$TARGET"; then
   echo "Generated BOOTSTRAP_TOKEN"
 fi
 
+if grep -q "replace-with-internal-auth-secret" "$TARGET"; then
+  INTERNAL_SECRET=$(openssl rand -hex 32)
+  sed -i "s/replace-with-internal-auth-secret/$INTERNAL_SECRET/g" "$TARGET"
+  echo "Generated INTERNAL_AUTH_SECRET"
+fi
+
 if grep -q "replace-with-strong-password" "$TARGET"; then
   PSQL_PASS=$(openssl rand -hex 16)
   sed -i "s/replace-with-strong-password/$PSQL_PASS/g" "$TARGET"
