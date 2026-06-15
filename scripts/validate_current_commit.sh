@@ -24,6 +24,7 @@ status=0
 run_check "frontend build" npm run build || status=1
 run_check "backend config validation" npm run validate:backend || status=1
 run_check "python unit tests" python3 -m pytest tests || status=1
+run_check "python syntax check" python3 -m py_compile shared/utils/security.py shared/models.py services/api-gateway/main.py services/agent-service/main.py services/policy-service/main.py services/skill-service/main.py services/memory-service/main.py services/orchestrator-service/main.py services/orchestrator-service/execution_store.py || status=1
 
 if command -v docker >/dev/null 2>&1; then
   run_check "compose config" docker compose -f infra/docker-compose.yml config || status=1
