@@ -156,7 +156,7 @@ class WorkflowQueueStore:
                     step_name="queued",
                     status="queued",
                     state_snapshot=initial_state,
-                    metadata={"queue_item_id": item.id, "max_retries": max_retries, "priority": priority},
+                    metadata_payload={"queue_item_id": item.id, "max_retries": max_retries, "priority": priority},
                 )
             )
             session.commit()
@@ -220,7 +220,7 @@ class WorkflowQueueStore:
                         step_name=step_name,
                         status=status,
                         state_snapshot=state_snapshot,
-                        metadata=metadata or {},
+                        metadata_payload=metadata or {},
                     )
                 )
                 session.commit()

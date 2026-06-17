@@ -1,4 +1,6 @@
+import logging
 import os
+import secrets
 from typing import Any
 import time
 from collections import defaultdict, deque
@@ -8,9 +10,10 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.base import BaseHTTPMiddleware
 
-from shared.utils.security import build_operator_context
+from shared.utils.security import build_operator_context, sign_internal_headers
 
 app = FastAPI(title="api-gateway", version="1.0.0")
+LOGGER = logging.getLogger("api-gateway")
 
 # Production-safe CORS handling (configure via CORS_ALLOWED_ORIGINS env var)
 origins_env = os.getenv("CORS_ALLOWED_ORIGINS", "")
@@ -167,7 +170,11 @@ async def resolve_identity(request: Request, *, required_permission: str | None 
         raise HTTPException(status_code=401, detail="api_key_required")
 
     async with httpx.AsyncClient(timeout=IDENTITY_TIMEOUT) as client:
-        response = await client.get(f"{AGENT_SERVICE_BASE}/internal/operators/resolve", params={"api_key": api_key})
+        response = await client.get(
+            f"{AGENT_SERVICE_BASE}/internal/operators/resolve",
+            params={"api_key": api_key},
+            headers={**sign_internal_headers(method="GET", path="/internal/operators/resolve", organization_id="gateway", operator_id="gateway", operator_role="service")},
+        )
     if response.status_code >= 400:
         raise HTTPException(status_code=401, detail="invalid_api_key")
     payload = response.json()
@@ -178,7 +185,7 @@ async def resolve_identity(request: Request, *, required_permission: str | None 
     return context
 
 
-def forward_headers(identity: dict[str, Any] | None):
+def forward_headers(identity: dict[str, Any] | None, *, method: str = "GET", path: str = "/"):
     headers = {"Content-Type": "application/json"}
     if identity:
         headers.update(
@@ -188,12 +195,32 @@ def forward_headers(identity: dict[str, Any] | None):
                 "x-operator-role": identity["operator_role"],
             }
         )
+        headers.update(
+            sign_internal_headers(
+                method=method,
+                path=path,
+                organization_id=identity["organization_id"] or "",
+                operator_id=identity["operator_id"] or "",
+                operator_role=identity["operator_role"] or "",
+            )
+        )
     return headers
 
 
-async def forward(method: str, target: str, *, identity: dict[str, Any] | None = None, payload: dict[str, Any] | None = None):
+async def forward(
+    method: str,
+    target: str,
+    *,
+    identity: dict[str, Any] | None = None,
+    payload: dict[str, Any] | None = None,
+    extra_headers: dict[str, str] | None = None,
+):
+    target_path = httpx.URL(target).path
+    headers = forward_headers(identity, method=method, path=target_path)
+    if extra_headers:
+        headers.update(extra_headers)
     async with httpx.AsyncClient(timeout=FORWARD_TIMEOUT) as client:
-        response = await client.request(method, target, json=payload, headers=forward_headers(identity))
+        response = await client.request(method, target, json=payload, headers=headers)
     detail = None
     try:
         detail = response.json()
@@ -210,8 +237,23 @@ def health():
 
 
 @app.post("/v1/organizations/bootstrap")
-async def bootstrap_organization(payload: dict[str, Any]):
-    return await forward("POST", f"{ROUTES['organizations']}/bootstrap", payload=payload)
+async def bootstrap_organization(payload: dict[str, Any], request: Request):
+    expected_token = os.getenv("BOOTSTRAP_TOKEN", "").strip()
+    provided_token = request.headers.get("x-bootstrap-token", "").strip()
+    if not expected_token or not secrets.compare_digest(provided_token, expected_token):
+        LOGGER.warning(
+            "bootstrap rejected at gateway client=%s configured=%s",
+            request.client.host if request.client else "unknown",
+            bool(expected_token),
+        )
+        raise HTTPException(status_code=401, detail="bootstrap_token_required")
+    return await forward(
+        "POST",
+        f"{ROUTES['organizations']}/bootstrap",
+        payload=payload,
+        identity={"organization_id": "bootstrap", "operator_id": "bootstrap", "operator_role": "admin"},
+        extra_headers={"x-bootstrap-token": provided_token},
+    )
 
 
 @app.get("/v1/organizations")
